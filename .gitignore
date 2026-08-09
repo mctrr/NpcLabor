@@ -9,7 +9,11 @@
 # Deploy / game output
 Package/
 
-# Session scratch at repo root — never treat as source of truth
+# Local-only agent / research (do not publish)
+.agents/
+.research/
+
+# Session scratch at repo root
 _tmp_*/
 tmp/
 tmp_*/
@@ -19,33 +23,10 @@ tmp_*
 .tmp_*
 .tmp_*/
 
-# Local reflect / decompile tooling leftovers
-.research/bin/
-.research/obj/
-.research/**/bin/
-.research/**/obj/
-.research/_dump_*/
-.research/_inspect*/
-.research/rfx*/
-.research/decompile_tmp/**/bin/
-.research/*.exe
+# Binaries
 *.exe
 *.dll
 *.pdb
-
-# Python/agent one-off scripts at research root (keep curated dumps only)
-.research/_*.py
-.research/_*.cs
-.research/w*.py
-.research/t.py
-.research/Program.cs
-.research/b64.txt
-.research/elin_types_*.txt
-.research/mk_*.py
-
-# Agent scaffolding scripts (handoffs are kept)
-.agents/_*.py
-.agents/_*.csfrag
 
 # Nested empty / accidental git dirs under source
 NpcLabor/.git/

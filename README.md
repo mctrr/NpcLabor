@@ -21,9 +21,5 @@ Deployed DLL lands under the game `Package\Mod_NpcLabor\` folder. Full game rest
 |------|------|
 | `NpcLabor/` | Mod source (Harmony patches + systems) |
 | `docs/` | Product / domain notes (`CONTEXT.md`) |
-| `.agents/` | Session handoffs |
-| `.research/` | Durable vanilla decompile cache (read `README.md` before dumping) |
 
-## Agent notes
-
-Read `AGENTS.md`, then `docs/CONTEXT.md`, then `.agents/handoff.md`.
+`.agents/` and `.research/` are local-only and are not published.
