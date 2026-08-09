@@ -1,0 +1,166 @@
+using System;
+using System.Collections.Generic;
+
+public class SourceQuest : SourceDataString<SourceQuest.Row>
+{
+	[Serializable]
+	public class Row : BaseRow
+	{
+		public string id;
+
+		public string name_JP;
+
+		public string name;
+
+		public string type;
+
+		public string[] drama;
+
+		public string idZone;
+
+		public string group;
+
+		public string[] tags;
+
+		public int money;
+
+		public int chance;
+
+		public int minFame;
+
+		public string detail_JP;
+
+		public string detail;
+
+		public string talkProgress_JP;
+
+		public string talkProgress;
+
+		public string talkComplete_JP;
+
+		public string talkComplete;
+
+		[NonSerialized]
+		public string name_L;
+
+		[NonSerialized]
+		public string detail_L;
+
+		[NonSerialized]
+		public string talkProgress_L;
+
+		[NonSerialized]
+		public string talkComplete_L;
+
+		public override bool UseAlias => false;
+
+		public override string GetAlias => "n";
+	}
+
+	public static readonly IReadOnlyDictionary<string, int> RowMapping = new Dictionary<string, int>
+	{
+		["id"] = 0,
+		["name_JP"] = 1,
+		["name"] = 2,
+		["type"] = 3,
+		["drama"] = 4,
+		["idZone"] = 5,
+		["group"] = 6,
+		["tags"] = 7,
+		["money"] = 8,
+		["chance"] = 9,
+		["minFame"] = 10,
+		["detail_JP"] = 11,
+		["detail"] = 12,
+		["talkProgress_JP"] = 13,
+		["talkProgress"] = 14,
+		["talkComplete_JP"] = 15,
+		["talkComplete"] = 16
+	};
+
+	public static readonly IReadOnlyDictionary<string, string> TypeMapping = new Dictionary<string, string>
+	{
+		["id"] = "string",
+		["name_JP"] = "string",
+		["name"] = "string",
+		["type"] = "string",
+		["drama"] = "string[]",
+		["idZone"] = "string",
+		["group"] = "string",
+		["tags"] = "string[]",
+		["money"] = "int",
+		["chance"] = "int",
+		["minFame"] = "int",
+		["detail_JP"] = "string",
+		["detail"] = "string",
+		["talkProgress_JP"] = "string",
+		["talkProgress"] = "string",
+		["talkComplete_JP"] = "string",
+		["talkComplete"] = "string"
+	};
+
+	public override string[] ImportFields => new string[2] { "talkProgress", "talkComplete" };
+
+	public override Row CreateRow()
+	{
+		return new Row
+		{
+			id = SourceData.GetString(0),
+			name_JP = SourceData.GetString(1),
+			name = SourceData.GetString(2),
+			type = SourceData.GetString(3),
+			drama = SourceData.GetStringArray(4),
+			idZone = SourceData.GetString(5),
+			group = SourceData.GetString(6),
+			tags = SourceData.GetStringArray(7),
+			money = SourceData.GetInt(8),
+			chance = SourceData.GetInt(9),
+			minFame = SourceData.GetInt(10),
+			detail_JP = SourceData.GetString(11),
+			detail = SourceData.GetString(12),
+			talkProgress_JP = SourceData.GetString(13),
+			talkProgress = SourceData.GetString(14),
+			talkComplete_JP = SourceData.GetString(15),
+			talkComplete = SourceData.GetString(16)
+		};
+	}
+
+	public override Row CreateRowByMapping(IReadOnlyDictionary<string, int> mapping)
+	{
+		return new Row
+		{
+			id = SourceData.GetString(mapping["id"]),
+			name_JP = SourceData.GetString(mapping["name_JP"]),
+			name = SourceData.GetString(mapping["name"]),
+			type = SourceData.GetString(mapping["type"]),
+			drama = SourceData.GetStringArray(mapping["drama"]),
+			idZone = SourceData.GetString(mapping["idZone"]),
+			group = SourceData.GetString(mapping["group"]),
+			tags = SourceData.GetStringArray(mapping["tags"]),
+			money = SourceData.GetInt(mapping["money"]),
+			chance = SourceData.GetInt(mapping["chance"]),
+			minFame = SourceData.GetInt(mapping["minFame"]),
+			detail_JP = SourceData.GetString(mapping["detail_JP"]),
+			detail = SourceData.GetString(mapping["detail"]),
+			talkProgress_JP = SourceData.GetString(mapping["talkProgress_JP"]),
+			talkProgress = SourceData.GetString(mapping["talkProgress"]),
+			talkComplete_JP = SourceData.GetString(mapping["talkComplete_JP"]),
+			talkComplete = SourceData.GetString(mapping["talkComplete"])
+		};
+	}
+
+	public override void SetRow(Row r)
+	{
+		map[r.id] = r;
+	}
+
+	public override IReadOnlyDictionary<string, int> GetRowMapping()
+	{
+		return RowMapping;
+	}
+
+	public override IReadOnlyDictionary<string, string> GetTypeMapping()
+	{
+		return TypeMapping;
+	}
+}

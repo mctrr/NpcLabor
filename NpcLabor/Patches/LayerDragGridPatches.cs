@@ -1,0 +1,1008 @@
+using System.Collections.Generic;
+using HarmonyLib;
+using NpcLabor.CoCraft;
+using NpcLabor.Process;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace NpcLabor.Patches;
+
+/// <summary>
+/// Slice B: processor operator mode switch on LayerDragGrid (加工).
+/// Mode off  = PC crafts as vanilla when grid fills.
+/// Mode on   = filling the grid starts an NPC job and closes the UI.
+/// </summary>
+[HarmonyPatch(typeof(LayerDragGrid))]
+internal static class LayerDragGridPatches
+{
+    const string ButtonName = "NpcLabor_OutsourceBtn";
+    const int MenuSelf = -200;
+    const int MenuAuto = -100;
+
+    /// <summary>
+    /// After we intercept TryStartCraft, OnProcess still calls RedrawButton.
+    /// Closing/clearing the layer first makes RefreshCost NRE; suppress during the
+    /// deferred start/close window only. Frame-stamped so the flag can never leak.
+    /// </summary>
+    internal static bool SuppressUiRefresh;
+    static int _ensureButtonFrame = -1;
+    static int _suppressFrame = -1;
+    static bool _startPending;
+
+    [HarmonyPostfix]
+    [HarmonyPatch(nameof(LayerDragGrid.SetInv))]
+    static void SetInvPostfix(LayerDragGrid __instance, InvOwnerDraglet owner)
+    {
+        try
+        {
+            EnsureModeButton(__instance, owner);
+            // Some machines finish layout after SetInv; re-try next frame.
+            ScheduleEnsureButton(__instance);
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogWarn("processor mode button failed: " + ex);
+        }
+    }
+
+    [HarmonyPrefix]
+    [HarmonyPatch(nameof(LayerDragGrid.RefreshCost))]
+    static bool RefreshCostPrefix(LayerDragGrid __instance)
+    {
+        ExpireStaleSuppress();
+        if (SuppressUiRefresh)
+        {
+            return false;
+        }
+
+        // Layer may already be tearing down after process close.
+        if (__instance == null || !__instance || __instance.owner == null || __instance.owner.owner == null)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Clear the one-shot start state (suppress flag + pending guard).</summary>
+    static void ClearStartState()
+    {
+        SuppressUiRefresh = false;
+        _suppressFrame = -1;
+        _startPending = false;
+    }
+
+    /// <summary>
+    /// Bounded-lifetime safety: if the deferred reset was lost (action queue cleared,
+    /// layer destroyed before FinishStart ran), the global flag auto-expires so it can
+    /// never stick across frames or suppress other layers.
+    /// </summary>
+    internal static void ExpireStaleSuppress()
+    {
+        if (!SuppressUiRefresh || _suppressFrame < 0)
+        {
+            return;
+        }
+
+        if (Time.frameCount - _suppressFrame > 2)
+        {
+            ClearStartState();
+        }
+    }
+
+    static void ScheduleEnsureButton(LayerDragGrid layer)
+    {
+        if (layer == null)
+        {
+            return;
+        }
+
+        try
+        {
+            // Avoid spamming many identical next-frame jobs in one open.
+            int frame = Time.frameCount;
+            if (_ensureButtonFrame == frame)
+            {
+                return;
+            }
+
+            _ensureButtonFrame = frame;
+            EClass.core.actionsNextFrame.Add(delegate
+            {
+                try
+                {
+                    if (layer == null || !layer)
+                    {
+                        return;
+                    }
+
+                    EnsureModeButton(layer, layer.owner);
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogDebug("deferred EnsureModeButton: " + ex.Message);
+                }
+            });
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("ScheduleEnsureButton: " + ex.Message);
+        }
+    }
+
+    static void EnsureModeButton(LayerDragGrid layer, InvOwnerDraglet? owner)
+    {
+        if (layer == null)
+        {
+            return;
+        }
+
+        TraitCrafter? crafter = (owner as InvOwnerCraft)?.crafter
+            ?? owner?.owner?.trait as TraitCrafter;
+
+        bool supported = ProcessorWhitelist.IsSupported(crafter);
+        UIButton? existing = FindOurButton(layer);
+
+        if (!supported)
+        {
+            if (existing != null)
+            {
+                existing.gameObject.SetActive(false);
+            }
+
+            return;
+        }
+
+        if (existing != null)
+        {
+            existing.gameObject.SetActive(true);
+            Wire(existing, layer, crafter!);
+            RefreshLabel(existing, crafter!);
+            return;
+        }
+
+        UIButton? created = TryCreateButton(layer);
+        if (created == null)
+        {
+            Plugin.LogWarn("processor mode: no host button slot on " + (crafter?.GetType().Name ?? "?"));
+            return;
+        }
+
+        created.gameObject.name = ButtonName;
+        created.gameObject.SetActive(true);
+        Wire(created, layer, crafter!);
+        RefreshLabel(created, crafter!);
+        Plugin.LogInfo(
+            "processor mode button ready for " + crafter!.GetType().Name
+            + " under " + GetPath(created.transform));
+    }
+
+    static UIButton? TryCreateButton(LayerDragGrid layer)
+    {
+        // Prefer any visible utility control; stock/refuel often hidden on simple mills.
+        UIButton? mold =
+            FirstActive(layer.buttonStock, layer.buttonAlly, layer.buttonRefuel, layer.buttonAutoRefuel, layer.buttonDeliver)
+            ?? layer.buttonStock
+            ?? layer.buttonAlly
+            ?? layer.buttonRefuel
+            ?? layer.buttonAutoRefuel
+            ?? layer.buttonDeliver
+            ?? layer.buttonOwner as UIButton
+            ?? FindAnyUiButton(layer);
+
+        if (mold != null && mold.transform.parent != null)
+        {
+            // Force mold parent active so our clone is visible even if mold itself was hidden.
+            Transform parent = mold.transform.parent;
+            try
+            {
+                parent.gameObject.SetActive(true);
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+GameObject go = Object.Instantiate(mold.gameObject, parent);
+            go.name = ButtonName;
+            go.SetActive(true);
+
+            UIButton? btn = go.GetComponent<UIButton>();
+            if (btn == null)
+            {
+                Object.Destroy(go);
+                return null;
+            }
+
+            try
+            {
+                btn.onClick.RemoveAllListeners();
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+try
+            {
+                if (btn.icon != null)
+                {
+                    btn.icon.SetActive(enable: false);
+                }
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+// Keep a compact fixed size so hidden molds don't leave a zero-size clone.
+            try
+            {
+                RectTransform rt = btn.GetComponent<RectTransform>();
+                if (rt != null)
+                {
+                    if (rt.rect.width < 8f || rt.rect.height < 8f)
+                    {
+                        rt.sizeDelta = new Vector2(72f, 28f);
+                    }
+                }
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+LayoutElement? le = go.GetComponent<LayoutElement>();
+            if (le == null)
+            {
+                le = go.AddComponent<LayoutElement>();
+            }
+
+            le.minWidth = 64f;
+            le.preferredWidth = 88f;
+            le.minHeight = 24f;
+            le.preferredHeight = 28f;
+            le.flexibleWidth = 0f;
+            le.ignoreLayout = false;
+
+            go.transform.SetAsLastSibling();
+            try
+            {
+                parent.RebuildLayout(recursive: true);
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+return btn;
+        }
+
+        // Fallback: window bottom button.
+        try
+        {
+            Window? host = null;
+            if (layer.windows != null && layer.windows.Count > 0)
+            {
+                host = layer.windows[0];
+            }
+
+            if (host != null)
+            {
+                UIButton btn = host.AddBottomButton("continue", () => { });
+                if (btn != null)
+                {
+                    btn.gameObject.name = ButtonName;
+                    return btn;
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("AddBottomButton mode failed: " + ex.Message);
+        }
+
+        return null;
+    }
+
+    static UIButton? FirstActive(params UIButton?[] buttons)
+    {
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            UIButton? b = buttons[i];
+            if (b != null && b.gameObject != null && b.gameObject.activeInHierarchy)
+            {
+                return b;
+            }
+        }
+
+        return null;
+    }
+
+    static UIButton? FindAnyUiButton(LayerDragGrid layer)
+    {
+        try
+        {
+            UIButton[] all = layer.GetComponentsInChildren<UIButton>(includeInactive: true);
+            for (int i = 0; i < all.Length; i++)
+            {
+                UIButton b = all[i];
+                if (b == null || b.gameObject.name == ButtonName)
+                {
+                    continue;
+                }
+
+                // Skip grid item slots.
+                if (b.GetComponent<ButtonGrid>() != null)
+                {
+                    continue;
+                }
+
+                return b;
+            }
+        }
+        catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+return null;
+    }
+
+    static void Wire(UIButton btn, LayerDragGrid layer, TraitCrafter crafter)
+    {
+        btn.onClick.RemoveAllListeners();
+        btn.SetOnClick(() => OpenModeMenu(layer, crafter));
+    }
+
+    static void OpenModeMenu(LayerDragGrid layer, TraitCrafter crafter)
+    {
+        try
+        {
+            int skillId = ProcessorWhitelist.ResolveSkillId(crafter);
+            string skillName = GetSkillName(skillId);
+            var options = new List<int> { MenuSelf, MenuAuto };
+
+            foreach (Chara c in AssistantResolver.ListEligible())
+            {
+                if (PersonPickerUi.IsPcLike(c))
+                {
+                    continue;
+                }
+
+                if (skillId > 0 && c.Evalue(skillId) <= 0)
+                {
+                    continue;
+                }
+
+                if (c.ai is AI_NpcProcess)
+                {
+                    continue;
+                }
+
+                options.Add(c.uid);
+            }
+
+            LayerList menu = EClass.ui.AddLayer<LayerList>();
+            menu.SetList2(
+                    options,
+                    id => MenuLabel(id),
+                    (id, item) =>
+                    {
+                        ApplyMode(id, crafter);
+                        UIButton? btn = FindOurButton(layer);
+                        if (btn != null)
+                        {
+                            RefreshLabel(btn, crafter);
+                        }
+
+                        SE.Click();
+                    },
+                    (id, item) =>
+                    {
+                        // SetList2 disables icon first; re-enable portrait via vanilla SetChara.
+                        PersonPickerUi.StyleRow(
+                            item,
+                            id,
+                            MenuLabel(id),
+                            MenuSub(id, skillId, skillName),
+                            menuSelf: MenuSelf,
+                            menuAuto: MenuAuto);
+                    })
+                .SetSize(460f);
+
+            string title = NpcLabor.LaborTerms.Process;
+            try
+            {
+                string machine = ProcessorWhitelist.DisplayName(crafter);
+                if (!machine.IsEmpty())
+                {
+                    title = NpcLabor.LaborTerms.Process + "·" + machine;
+                }
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+try
+            {
+                menu.SetHeader(title);
+            }
+            catch
+            {
+                try
+                {
+                    if (menu.windows != null && menu.windows.Count > 0)
+                    {
+                        menu.windows[0].SetCaption(title);
+                    }
+                }
+                catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+}
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogWarn("processor mode menu failed: " + ex);
+        }
+    }
+
+    static string MenuLabel(int id)
+    {
+        if (id == MenuSelf)
+        {
+            return NpcLabor.LaborText.T("proc.mode.selfYou");
+        }
+
+        if (id == MenuAuto)
+        {
+            return NpcLabor.LaborText.T("proc.mode.auto");
+        }
+
+        Chara? c = RefChara.Get(id);
+        if (c == null || PersonPickerUi.IsPcLike(c))
+        {
+            return c == null ? ("#" + id) : NpcLabor.LaborText.T("proc.mode.selfYou");
+        }
+
+        string name = AssistantResolver.NameOf(c);
+        if (name.Length > 8)
+        {
+            name = name.Substring(0, 8);
+        }
+
+        string tag = AssistantResolver.IsPartyMember(c)
+            ? NpcLabor.LaborText.T("co.tag.party")
+            : NpcLabor.LaborText.T("co.tag.home");
+        return tag + " " + name;
+    }
+
+    static string MenuSub(int id, int skillId, string skillName)
+    {
+        if (id == MenuSelf)
+        {
+            return NpcLabor.LaborText.T("proc.menu.selfProcess");
+        }
+
+        if (skillId <= 0)
+        {
+            return id == MenuAuto ? NpcLabor.LaborText.T("proc.menu.pickBest") : "";
+        }
+
+        string sn = skillName.IsEmpty() ? NpcLabor.LaborText.T("proc.menu.skillShort") : skillName;
+        if (sn.Length > 4)
+        {
+            sn = sn.Substring(0, 4);
+        }
+
+        if (id == MenuAuto)
+        {
+            Chara? best = ProcessorOutsourceMode.FindBest(skillId);
+            if (best == null)
+            {
+                return NpcLabor.LaborText.T("proc.menu.noOne");
+            }
+
+            return sn + " " + best.Evalue(skillId);
+        }
+
+        Chara? c = RefChara.Get(id);
+        if (c == null)
+        {
+            return "";
+        }
+
+        int v = c.Evalue(skillId);
+        return v > 0 ? sn + " " + v : "";
+    }
+
+    static void ApplyMode(int id, TraitCrafter crafter)
+    {
+        if (id == MenuSelf)
+        {
+            ProcessorOutsourceMode.SetOff();
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.selfMode"));
+            return;
+        }
+
+        if (id == MenuAuto)
+        {
+            ProcessorOutsourceMode.SetAuto();
+            int skillId = ProcessorWhitelist.ResolveSkillId(crafter);
+            Chara? best = ProcessorOutsourceMode.FindBest(skillId);
+            if (best != null)
+            {
+                Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.autoSet", AssistantResolver.NameOf(best)));
+            }
+            else
+            {
+                Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.autoNone"));
+            }
+
+            return;
+        }
+
+        ProcessorOutsourceMode.SetPin(id);
+        Chara? c = ProcessorOutsourceMode.GetPinned();
+        if (c != null)
+        {
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.pinned", AssistantResolver.NameOf(c)));
+        }
+        else
+        {
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.pinFailed"));
+        }
+    }
+
+    static void RefreshLabel(UIButton btn, TraitCrafter crafter)
+    {
+        int skillId = ProcessorWhitelist.ResolveSkillId(crafter);
+        // Compact chip: 加工·自己 / 加工·自动 / 加工·名字
+        string mode = ProcessorOutsourceMode.Describe(skillId);
+        SetLabel(btn, NpcLabor.LaborTerms.Process + "·" + mode);
+    }
+
+    /// <summary>
+    /// Called when the drag-grid would normally start PC craft.
+    /// Returns true if we consumed the start (NPC job or blocked).
+    /// </summary>
+    internal static bool TryInterceptStart(InvOwnerCraft inv)
+    {
+        if (inv == null || inv.crafter == null)
+        {
+            return false;
+        }
+
+        if (!ProcessorWhitelist.IsSupported(inv.crafter))
+        {
+            return false;
+        }
+
+        if (!ProcessorOutsourceMode.IsEnabled)
+        {
+            return false;
+        }
+
+        LayerDragGrid? layer = inv.dragGrid ?? LayerDragGrid.Instance;
+        if (layer == null)
+        {
+            return false;
+        }
+
+        if (ProcessorJobSession.Active)
+        {
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.busy"));
+            SE.BeepSmall();
+            return true;
+        }
+
+        // Grids must be full — vanilla already checked, re-check safety.
+        for (int i = 0; i < inv.numDragGrid; i++)
+        {
+            if (layer.buttons[i].Card == null)
+            {
+                return true;
+            }
+        }
+
+        List<Thing> targets = layer.GetTargets();
+        if (targets == null || targets.Count == 0)
+        {
+            SE.BeepSmall();
+            return true;
+        }
+
+        for (int i = 0; i < targets.Count; i++)
+        {
+            if (targets[i] == null || targets[i].isDestroyed || targets[i].Num <= 0)
+            {
+                Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.materialIncomplete"));
+                SE.BeepSmall();
+                return true;
+            }
+        }
+
+        if (!inv.crafter.IsFuelEnough(1, targets))
+        {
+            Msg.Say("notEnoughFuel");
+            SE.BeepSmall();
+            return true;
+        }
+
+        int skillId = ProcessorWhitelist.ResolveSkillId(inv.crafter);
+        Chara? worker = ProcessorOutsourceMode.ResolveWorker(skillId);
+        if (worker == null)
+        {
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.noWorker"));
+            SE.BeepSmall();
+            // Do not fall through to PC craft silently if user enabled NPC process.
+            return true;
+        }
+
+        int max = targets[0].Num;
+        for (int i = 1; i < targets.Count; i++)
+        {
+            if (targets[i].Num < max)
+            {
+                max = targets[i].Num;
+            }
+        }
+
+        if (targets.Count >= 2 && targets[0] == targets[1])
+        {
+            max = targets[0].Num / 2;
+        }
+
+        if (max <= 0)
+        {
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.notEnoughMaterial"));
+            SE.BeepSmall();
+            return true;
+        }
+
+        // Use full available stack count for the job.
+        StartJob(layer, inv.crafter, targets, worker, max);
+        return true;
+    }
+
+    static void StartJob(
+        LayerDragGrid layer,
+        TraitCrafter crafter,
+        List<Thing> targets,
+        Chara worker,
+        int count)
+    {
+        try
+        {
+            if (count <= 0 || ProcessorJobSession.Active || _startPending)
+            {
+                return;
+            }
+
+            for (int i = 0; i < targets.Count; i++)
+            {
+                Thing? t = targets[i];
+                if (t == null || t.isDestroyed || t.Num < count)
+                {
+                    if (targets.Count >= 2 && i == 1 && targets[0] == targets[1] && t != null && t.Num >= count)
+                    {
+                        continue;
+                    }
+
+                    Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.changed"));
+                    SE.BeepSmall();
+                    return;
+                }
+            }
+
+            if (targets.Count >= 2 && targets[0] == targets[1] && targets[0].Num < count * 2)
+            {
+                Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.changed"));
+                SE.BeepSmall();
+                return;
+            }
+
+            var claimed = new List<Thing>();
+            for (int i = 0; i < targets.Count; i++)
+            {
+                Thing src = targets[i];
+                Thing? piece = null;
+                try
+                {
+                    piece = src.Split(count);
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogWarn("split ingredient failed: " + ex.Message);
+                    Refund(claimed);
+                    Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.cannotTake"));
+                    return;
+                }
+
+                if (piece == null)
+                {
+                    Refund(claimed);
+                    Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.cannotTake"));
+                    return;
+                }
+
+                claimed.Add(piece);
+            }
+
+            // Keep claimed pieces on PC so they are not orphaned while UI closes.
+            if (EClass.pc != null)
+            {
+                for (int i = 0; i < claimed.Count; i++)
+                {
+                    Thing? piece = claimed[i];
+                    if (piece == null || piece.isDestroyed)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        EClass.pc.Pick(piece, msg: false, tryStack: false);
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            EClass.pc.AddThing(piece);
+                        }
+                        catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+}
+                }
+            }
+
+            // Suppress RefreshCost/Redraw while OnProcess finishes and while we tear down UI.
+            // Frame-stamp so ExpireStaleSuppress can bound the window.
+            SuppressUiRefresh = true;
+            _suppressFrame = Time.frameCount;
+            _startPending = true;
+
+            // Stop any PC craft AI that may already be spinning up.
+            try
+            {
+                if (EClass.pc?.ai is AI_UseCrafter && EClass.pc.ai.IsRunning)
+                {
+                    EClass.pc.ai.Success();
+                }
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+// Clear grid slots without forcing put-back of claimed stacks (already split off).
+            try
+            {
+                if (layer != null && (bool)layer && layer.buttons != null)
+                {
+                    for (int i = 0; i < layer.buttons.Count; i++)
+                    {
+                        ButtonGrid? b = layer.buttons[i];
+                        if (b == null || !b.gameObject.activeSelf)
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            b.SetCardGrid(null);
+                        }
+                        catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+}
+                }
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+// Capture refs for deferred start/close so OnProcess RedrawButton can return safely first.
+            TraitCrafter crafterRef = crafter;
+            Chara workerRef = worker;
+            List<Thing> claimedRef = claimed;
+            int countRef = count;
+            LayerDragGrid? layerRef = layer;
+
+            void FinishStart()
+            {
+                try
+                {
+                    if (EClass.pc != null)
+                    {
+                        for (int i = 0; i < claimedRef.Count; i++)
+                        {
+                            Thing? piece = claimedRef[i];
+                            if (piece == null || piece.isDestroyed)
+                            {
+                                continue;
+                            }
+
+                            try
+                            {
+                                Card? root = piece.GetRootCard();
+                                if (root != EClass.pc)
+                                {
+                                    EClass.pc.Pick(piece, msg: false, tryStack: false);
+                                }
+                            }
+                            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+}
+                    }
+
+                    bool ok = ProcessorJobSession.TryStart(workerRef, crafterRef, claimedRef, countRef);
+                    if (!ok)
+                    {
+                        Refund(claimedRef);
+                        SE.BeepSmall();
+                    }
+                    else
+                    {
+                        SE.Click();
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogWarn("deferred StartJob failed: " + ex);
+                    Refund(claimedRef);
+                }
+                finally
+                {
+                    try
+                    {
+                        if (layerRef != null && (bool)layerRef)
+                        {
+                            layerRef.Close();
+                        }
+                    }
+                    catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+                    // Single-delay window only: clear right after Close so the global
+                    // suppress flag never leaks into a second frame / other layers.
+                    // Late RefreshCost from the OnKill path is still guarded by the
+                    // null checks in RefreshCostPrefix above.
+                    ClearStartState();
+                }
+            }
+
+            // Defer job start + UI close to next frame so current OnProcess/RedrawButton stack finishes.
+            try
+            {
+                EClass.core.actionsNextFrame.Add(FinishStart);
+            }
+            catch
+            {
+                // Fallback if core queue unavailable.
+                FinishStart();
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ClearStartState();
+            Plugin.LogWarn("StartJob failed: " + ex);
+        }
+    }
+
+    static void Refund(List<Thing> claimed)
+    {
+        if (claimed == null || EClass.pc == null)
+        {
+            return;
+        }
+
+        foreach (Thing t in claimed)
+        {
+            if (t == null || t.isDestroyed)
+            {
+                continue;
+            }
+
+            try
+            {
+                EClass.pc.Pick(t);
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+}
+    }
+
+    static UIButton? FindOurButton(LayerDragGrid layer)
+    {
+        Transform? t = FindChildRecursive(layer.transform, ButtonName);
+        if (t == null && layer.windows != null)
+        {
+            for (int i = 0; i < layer.windows.Count; i++)
+            {
+                Window? w = layer.windows[i];
+                if (w == null)
+                {
+                    continue;
+                }
+
+                t = FindChildRecursive(w.transform, ButtonName);
+                if (t != null)
+                {
+                    break;
+                }
+            }
+        }
+
+        return t != null ? t.GetComponent<UIButton>() : null;
+    }
+
+    static void SetLabel(UIButton btn, string label)
+    {
+        if (btn == null)
+        {
+            return;
+        }
+
+        if (btn.mainText != null)
+        {
+            btn.mainText.text = label;
+            try
+            {
+                btn.mainText.SetText(label);
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+}
+    }
+
+    static string GetSkillName(int skillId)
+    {
+        if (skillId <= 0)
+        {
+            return "";
+        }
+
+        try
+        {
+            Element el = Element.Create(skillId, 0);
+            if (el != null && !el.Name.IsEmpty())
+            {
+                return el.Name;
+            }
+        }
+        catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+return "";
+    }
+
+    static string GetPath(Transform t)
+    {
+        var parts = new List<string>();
+        Transform? cur = t;
+        int guard = 0;
+        while (cur != null && guard++ < 14)
+        {
+            parts.Add(cur.name);
+            cur = cur.parent;
+        }
+
+        parts.Reverse();
+        return string.Join("/", parts);
+    }
+
+    static Transform? FindChildRecursive(Transform parent, string name)
+    {
+        if (parent.name == name)
+        {
+            return parent;
+        }
+
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            Transform? found = FindChildRecursive(parent.GetChild(i), name);
+            if (found != null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+}
+
+/// <summary>
+/// When process mode is on (not self), divert full-grid auto-start from PC to NPC job.
+/// </summary>
+[HarmonyPatch(typeof(InvOwnerCraft), nameof(InvOwnerCraft.TryStartCraft))]
+internal static class InvOwnerCraftOutsourcePatch
+{
+    [HarmonyPrefix]
+    static bool Prefix(InvOwnerCraft __instance)
+    {
+        try
+        {
+            if (LayerDragGridPatches.TryInterceptStart(__instance))
+            {
+                return false;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogWarn("TryStartCraft intercept failed: " + ex);
+        }
+
+        return true;
+    }
+}
+
+/// <summary>
+/// Guard RedrawButton during process intercept so RefreshCost is not hit on a half-closed layer.
+/// </summary>
+[HarmonyPatch(typeof(InvOwnerDraglet), nameof(InvOwnerDraglet.RedrawButton))]
+internal static class InvOwnerDragletRedrawButtonPatch
+{
+    [HarmonyPrefix]
+    static bool Prefix()
+    {
+        LayerDragGridPatches.ExpireStaleSuppress();
+        return !LayerDragGridPatches.SuppressUiRefresh;
+    }
+}
+
