@@ -5,16 +5,32 @@ namespace NpcLabor.Process;
 
 /// <summary>
 /// Runtime-only processor outsourcing jobs (slice B). Not saved.
-/// One NPC runs conversion at a TraitCrafter (saw / mill / wood mill).
-/// Product is dropped on the ground at the machine; leftovers returned to PC.
+/// Ingredients park on the machine tile. PC leave: party worker Clears; resident
+/// job is held (Suspended) with SuspendedAtRaw recorded — no hour-tick craft while
+/// away. On return to WorkZoneUid: compute finished crafts from elapsed game minutes,
+/// spawn products for that count at half away speed, then resume freestanding AI if Remaining > 0.
 /// </summary>
 internal static class ProcessorJobSession
 {
     internal const float NpcSpPerSkill = 0.25f;
+    /// <summary>NPC process duration multiplier vs skill-scaled base (half speed-cost = faster).</summary>
+    internal const float NpcDurationFactor = 0.5f;
+    /// <summary>
+    /// Catch-up model: one AI progress step ~= one game minute (GameDate raw unit).
+    /// Live craft uses Progress_Custom duration with interval 2; away catch-up is a
+    /// coarse estimate (duration minutes per craft), not a full anime sim.
+    /// </summary>
+    internal const int MinutesPerProgress = 1;
+    /// <summary>Away catch-up only: half on-map rate (double minutes per craft).</summary>
+    internal const int AwaySpeedDivisor = 2;
 
     internal static bool Active;
+    /// <summary>Resident job held while PC is away from the work map. No live AI / no hour sim.</summary>
+    internal static bool Suspended;
     internal static int NpcUid;
     internal static int MachineUid;
+    /// <summary>Zone where machine + parked ings live. Catch-up only runs when PC re-enters this zone.</summary>
+    internal static int WorkZoneUid;
     internal static int SkillId;
     internal static int NpcSkill;
     internal static int Remaining;
@@ -25,13 +41,45 @@ internal static class ProcessorJobSession
     internal static string LastClearReason = "";
     /// <summary>Party companions leave party for the job so AI is free, then rejoin on Clear. Flag order matches town labor / vanilla auto-rejoin.</summary>
     internal static bool WasPartyMember;
+    /// <summary>Last observed live craft duration (after NPC half-cut). Used for return catch-up.</summary>
+    internal static int LastDuration;
+    /// <summary>Last observed SP cost per craft (after NPC reduction; SP not drained for NPC jobs).</summary>
+    internal static int LastCostSp;
+    /// <summary>world.date.GetRaw() when the job was suspended (PC left).</summary>
+    internal static int SuspendedAtRaw;
+    /// <summary>Ignore freestanding AI cancel for a few frames after resume SetAI.</summary>
+    internal static int ResumeIgnoreCancelUntilFrame;
 
     // Strong refs: installed furniture is not always found via map uid lookup alone.
     internal static TraitCrafter? CrafterRef;
     internal static Card? MachineRef;
 
-    // Snapshot of ingredients assigned to the job (Things may be split copies).
+    // Live ingredient stacks for the job. After zone unload these refs go stale -
+    // rebind from IngredientMarks before any catch-up / resume craft.
     internal static readonly List<Thing> Ingredients = new List<Thing>();
+    /// <summary>Stable identity for parked ings across map unload/reload.</summary>
+    internal static readonly List<IngredientMark> IngredientMarks = new List<IngredientMark>();
+
+    internal struct IngredientMark
+    {
+        internal int Uid;
+        internal string Id;
+        internal int MaterialId;
+
+        internal static IngredientMark From(Thing t)
+        {
+            IngredientMark m = default;
+            if (t == null)
+            {
+                return m;
+            }
+
+            try { m.Uid = t.uid; } catch { m.Uid = 0; }
+            try { m.Id = t.id ?? ""; } catch { m.Id = ""; }
+            try { m.MaterialId = t.material != null ? t.material.id : t.idMaterial; } catch { m.MaterialId = 0; }
+            return m;
+        }
+    }
 
     internal static Chara? GetWorker()
     {
@@ -41,9 +89,26 @@ internal static class ProcessorJobSession
         }
 
         Chara? c = RefChara.Get(NpcUid);
-        if (c == null || c.isDead || !c.IsAliveInCurrentZone)
+        if (c == null || c.isDead)
         {
             return null;
+        }
+
+        // Suspended jobs may keep the worker on an unloaded home map; only require
+        // live-in-current-zone when freestanding AI should actually run.
+        if (!Suspended)
+        {
+            try
+            {
+                if (!c.IsAliveInCurrentZone)
+                {
+                    return null;
+                }
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         return c;
@@ -127,7 +192,8 @@ internal static class ProcessorJobSession
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("ProcessorJobSession.cs silent catch: " + __e.Message); }
-try
+
+        try
         {
             if (EClass._map.things != null)
             {
@@ -141,7 +207,8 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("ProcessorJobSession.cs silent catch: " + __e.Message); }
-// Installed furniture is held via CrafterRef/MachineRef at job start.
+
+        // Installed furniture is held via CrafterRef/MachineRef at job start.
         // Do not walk Installed by uid: PropsInstalled.Find is id-based, not uid-based.
         return null;
     }
@@ -180,6 +247,7 @@ try
 
         // Claim ingredient stacks (split so PC inventory keeps remainder).
         Ingredients.Clear();
+        IngredientMarks.Clear();
         for (int i = 0; i < ings.Count; i++)
         {
             Thing? src = ings[i];
@@ -187,11 +255,22 @@ try
             {
                 ReturnIngredientsToPc();
                 Ingredients.Clear();
+                IngredientMarks.Clear();
                 return false;
             }
 
-            // For multi-batch, we keep the full stack and consume per craft via Split.
+            // Park on the machine tile for the whole multi-batch job.
+            // Do not hold bulk materials in PC inventory (overweight).
+            if (!ParkIngredientOnMachine(src, crafter))
+            {
+                ReturnIngredientsToPc();
+                Ingredients.Clear();
+                IngredientMarks.Clear();
+                return false;
+            }
+
             Ingredients.Add(src);
+            IngredientMarks.Add(IngredientMark.From(src));
         }
 
         Active = true;
@@ -208,6 +287,19 @@ try
         MachineName = ProcessorWhitelist.DisplayName(crafter);
         LastClearReason = "";
         WasPartyMember = false;
+        LastDuration = 0;
+        LastCostSp = 0;
+        Suspended = false;
+        SuspendedAtRaw = 0;
+        ResumeIgnoreCancelUntilFrame = 0;
+        try
+        {
+            WorkZoneUid = EClass._zone != null ? EClass._zone.uid : 0;
+        }
+        catch
+        {
+            WorkZoneUid = 0;
+        }
 
         // Party AI can keep companions glued to the PC; temporarily detach so they can work.
         // Order matters: vanilla Party.RemoveMember always clears c_wasInPcParty=false.
@@ -264,6 +356,55 @@ try
         return Mathf.Max(1, reduced);
     }
 
+    /// <summary>Half NPC process duration vs the skill-scaled vanilla-style base.</summary>
+    internal static int ApplyNpcDurationCut(int baseDuration)
+    {
+        return Mathf.Max(1, Mathf.FloorToInt(Mathf.Max(1, baseDuration) * NpcDurationFactor));
+    }
+
+    /// <summary>Cache live craft timing for estimates / debug.</summary>
+    internal static void RememberCraftTiming(int duration, int costSp)
+    {
+        if (!Active)
+        {
+            return;
+        }
+
+        if (duration > 0)
+        {
+            LastDuration = duration;
+        }
+
+        if (costSp > 0)
+        {
+            LastCostSp = costSp;
+        }
+    }
+
+    internal static int EstimateDuration()
+    {
+        if (LastDuration > 0)
+        {
+            return LastDuration;
+        }
+
+        int skill = Mathf.Max(0, NpcSkill);
+        int raw = 10 * 100 / Mathf.Max(1, 80 + skill * 5);
+        return ApplyNpcDurationCut(raw);
+    }
+
+    static int CurrentRawDate()
+    {
+        try
+        {
+            return EClass.world?.date?.GetRaw() ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     internal static void NoteCompleted(int exp)
     {
         if (!Active)
@@ -287,8 +428,13 @@ try
     {
         if (!Active && NpcUid == 0)
         {
+            if (Ingredients.Count == 0 && IngredientMarks.Count > 0)
+            {
+                try { TryRebindIngredients(GetMachineCard()); } catch { }
+            }
             ReturnIngredientsToPc();
             Ingredients.Clear();
+            IngredientMarks.Clear();
             return;
         }
 
@@ -305,13 +451,22 @@ try
         int restoreUid = NpcUid;
         bool restoreParty = WasPartyMember;
 
+        // After suspend, Ingredients were cleared; rebind from marks before refund.
+        if (Ingredients.Count == 0 && IngredientMarks.Count > 0)
+        {
+            try { TryRebindIngredients(GetMachineCard()); } catch { }
+        }
+
         // Return any leftover claimed ingredients still on map / held by NPC.
         ReturnIngredientsToPc();
         Ingredients.Clear();
+        IngredientMarks.Clear();
 
         Active = false;
+        Suspended = false;
         NpcUid = 0;
         MachineUid = 0;
+        WorkZoneUid = 0;
         CrafterRef = null;
         MachineRef = null;
         SkillId = 0;
@@ -322,6 +477,10 @@ try
         NpcName = null;
         MachineName = null;
         WasPartyMember = false;
+        LastDuration = 0;
+        LastCostSp = 0;
+        SuspendedAtRaw = 0;
+        ResumeIgnoreCancelUntilFrame = 0;
 
         if (restoreParty && restoreUid > 0)
         {
@@ -442,29 +601,7 @@ try
 
             try
             {
-                // If still sitting on the machine tile (consume-ing path), pick back to PC.
-                if (t.ExistsOnMap)
-                {
-                    t.isHidden = false;
-                    EClass.pc.Pick(t);
-                    continue;
-                }
-
-                // If in NPC inventory, transfer to PC.
-                Card? root = t.GetRootCard();
-                if (root != null && root.IsPC)
-                {
-                    continue;
-                }
-
-                if (root != null && root.isChara && root != EClass.pc)
-                {
-                    EClass.pc.Pick(t);
-                    continue;
-                }
-
-                // Orphaned stack — try pick.
-                EClass.pc.Pick(t);
+                ReturnOneIngredientToPc(t);
             }
             catch (System.Exception ex)
             {
@@ -473,11 +610,636 @@ try
         }
     }
 
+    /// <summary>
+    /// Park a claimed ingredient stack on the machine tile for the job lifetime.
+    /// Visible on the machine; ignoreAutoPick so bulk is not auto-looted mid-job.
+    /// </summary>
+    internal static bool ParkIngredientOnMachine(Thing piece, TraitCrafter crafter)
+    {
+        if (piece == null || piece.isDestroyed || piece.Num <= 0)
+        {
+            return false;
+        }
+        Card? machine = crafter?.owner;
+        if (machine == null || machine.isDestroyed || EClass._zone == null)
+        {
+            return false;
+        }
+        try
+        {
+            // Already sitting on the machine cell — just re-mark parking flags.
+            if (piece.ExistsOnMap
+                && machine.ExistsOnMap
+                && piece.pos != null
+                && machine.pos != null
+                && piece.pos.Equals(machine.pos))
+            {
+                ApplyParkFlags(piece);
+                return true;
+            }
+            Point? place = machine.ExistsOnMap
+                ? machine.pos
+                : (EClass.pc != null ? EClass.pc.pos : null);
+            if (place == null)
+            {
+                return false;
+            }
+            Card card = EClass._zone.AddCard(piece, place);
+            if (card == null || card.isDestroyed)
+            {
+                return false;
+            }
+            try
+            {
+                card.altitude = machine.ExistsOnMap ? 0 : 1;
+            }
+            catch
+            {
+            }
+            ApplyParkFlags(card as Thing ?? piece);
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogWarn("park ingredient on machine failed: " + ex.Message);
+            return false;
+        }
+    }
+    internal static void ApplyParkFlags(Thing t)
+    {
+        if (t == null || t.isDestroyed)
+        {
+            return;
+        }
+        // Never hide parked bulk. isHidden makes stacks look deleted and confuses
+        // map/inventory scans; ignoreAutoPick alone is enough to stop auto-loot.
+        try { t.isHidden = false; } catch { } // heal older builds that hid bulk
+        try { t.ignoreAutoPick = true; } catch { }
+    }
+    internal static void ClearParkFlags(Thing t)
+    {
+        if (t == null || t.isDestroyed)
+        {
+            return;
+        }
+        try { t.isHidden = false; } catch { } // heal older builds that hid bulk
+        try { t.ignoreAutoPick = false; } catch { }
+    }
+    /// <summary>
+    /// After Split for one craft cycle: keep microwave pieces hidden; show others for anime.
+    /// </summary>
+    internal static void PrepareCraftPiece(Thing piece, TraitCrafter crafter)
+    {
+        if (piece == null || piece.isDestroyed)
+        {
+            return;
+        }
+        try
+        {
+            // Duplicate() copies bit flags from the parked bulk stack.
+            bool hide = crafter != null && crafter.animeType == TraitCrafter.AnimeType.Microwave;
+            piece.isHidden = hide;
+        }
+        catch
+        {
+        }
+        try { piece.ignoreAutoPick = true; } catch { }
+    }
+    internal static void ReturnOneIngredientToPc(Thing t)
+    {
+        if (t == null || t.isDestroyed || t.Num <= 0 || EClass.pc == null)
+        {
+            return;
+        }
+        ClearParkFlags(t);
+        Card? root = null;
+        try
+        {
+            root = t.GetRootCard();
+        }
+        catch
+        {
+            root = null;
+        }
+        if (root != null && root.IsPC)
+        {
+            return;
+        }
+        EClass.pc.Pick(t);
+    }
+    /// <summary>True when a process job occupies the worker (running or held away).</summary>
+    internal static bool IsJobHeld()
+    {
+        return Active && NpcUid != 0;
+    }
+
+    /// <summary>
+    /// PC is leaving the current map. Party workers abort; residents hold the job
+    /// (ings stay on machine) until PC returns to WorkZoneUid.
+    /// </summary>
+    internal static void OnPcLeavingZone()
+    {
+        if (!Active || Suspended)
+        {
+            return;
+        }
+
+        if (WasPartyMember)
+        {
+            Clear("zone-change");
+            return;
+        }
+
+        SuspendForZoneLeave();
+    }
+
+    /// <summary>
+    /// Freestanding AI cancelled. If PC is leaving / job already held, do not wipe resident work.
+    /// </summary>
+    internal static void HandleAiInterrupted(string reason)
+    {
+        if (!Active)
+        {
+            return;
+        }
+
+        if (Suspended)
+        {
+            return;
+        }
+
+        if (WasPartyMember)
+        {
+            Clear(string.IsNullOrEmpty(reason) ? "ai-cancel" : reason);
+            return;
+        }
+
+        if ((reason == "ai-cancel" || reason == "ai-fail")
+            && ResumeIgnoreCancelUntilFrame > 0
+            && Time.frameCount <= ResumeIgnoreCancelUntilFrame)
+        {
+            return;
+        }
+
+        bool leaving = false;
+        try
+        {
+            if (EClass.pc != null && EClass.player != null)
+            {
+                leaving = EClass.player.nextZone != null
+                    && (EClass._zone == null || EClass.player.nextZone.uid != EClass._zone.uid);
+            }
+        }
+        catch { leaving = false; }
+
+        bool offWork = false;
+        try
+        {
+            if (WorkZoneUid != 0 && EClass._zone != null && EClass._zone.uid != WorkZoneUid)
+            {
+                offWork = true;
+            }
+        }
+        catch { offWork = false; }
+
+        if (leaving || offWork)
+        {
+            SuspendForZoneLeave();
+            return;
+        }
+
+        Clear(string.IsNullOrEmpty(reason) ? "ai-cancel" : reason);
+    }
+
+    static void SuspendForZoneLeave()
+    {
+        if (!Active || Suspended)
+        {
+            return;
+        }
+
+        Suspended = true;
+        LastClearReason = "zone-suspend";
+        SuspendedAtRaw = CurrentRawDate();
+
+        // Drop live Thing refs while the work map is unloading. Marks keep identity
+        // so return catch-up rebinds the real parked stacks (avoids ghost Split/dupe).
+        RefreshIngredientMarksFromLive();
+        Ingredients.Clear();
+        CrafterRef = null;
+        MachineRef = null;
+
+        // Drop freestanding AI; OnCancel will no-op while Suspended.
+        try
+        {
+            Chara? worker = RefChara.Get(NpcUid);
+            if (worker != null && !worker.isDead)
+            {
+                try
+                {
+                    // Stop freestanding process AI; Suspended makes OnCancel a no-op.
+                    worker.SetAI(new NoGoal());
+                }
+                catch
+                {
+                    try { worker.SetNoGoal(); } catch { }
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("processor suspend stop ai: " + ex.Message);
+        }
+
+        string name = NpcName ?? NpcLabor.LaborText.T("proc.msg.residentFallback");
+        try
+        {
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.zoneContinue", name, NpcLabor.LaborTerms.Process));
+        }
+        catch { }
+
+        Plugin.LogInfo(
+            $"processor suspend leave npc={NpcUid} left={Remaining} workZone={WorkZoneUid} raw={SuspendedAtRaw}");
+    }
+
+    /// <summary>PC entered a zone — if it is the work map, catch up then resume leftover work.</summary>
+    internal static void OnZoneEntered(Zone? zone)
+    {
+        if (!Active || !Suspended || zone == null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (WorkZoneUid != 0 && zone.uid != WorkZoneUid)
+            {
+                return;
+            }
+        }
+        catch
+        {
+            return;
+        }
+
+        ApplyReturnCatchUpAndResume();
+    }
+
+    static void ApplyReturnCatchUpAndResume()
+    {
+        if (!Active || !Suspended)
+        {
+            return;
+        }
+
+        // Rebind machine on the now-loaded map.
+        CrafterRef = null;
+        MachineRef = null;
+        TraitCrafter? crafter = GetCrafter();
+        Card? machine = crafter?.owner;
+        Chara? worker = GetWorker();
+
+        if (worker == null || worker.isDead)
+        {
+            Clear("ai-fail");
+            return;
+        }
+
+        if (crafter == null || machine == null || machine.isDestroyed)
+        {
+            Clear("machine-gone");
+            return;
+        }
+
+        // Map reload replaces Card instances - rebind parked bulk before any Split/Craft.
+        if (!TryRebindIngredients(machine))
+        {
+            Plugin.LogWarn(
+                $"processor return rebind failed npc={NpcUid} marks={IngredientMarks.Count} - clear without free product");
+            Clear("no-ings");
+            return;
+        }
+
+        // GetRaw() is game minutes. Live duration is AI progress steps; treat each
+        // step as one minute so leave/return settle without simulating ticks off-map.
+        // Away rate is half on-map speed (user lock).
+        int now = CurrentRawDate();
+        int elapsedMins = SuspendedAtRaw > 0 && now > SuspendedAtRaw ? now - SuspendedAtRaw : 0;
+        int minsPerCraft = Mathf.Max(1, EstimateDuration() * MinutesPerProgress * AwaySpeedDivisor);
+        int canDo = minsPerCraft > 0 ? elapsedMins / minsPerCraft : 0;
+        if (canDo > Remaining)
+        {
+            canDo = Remaining;
+        }
+
+        int did = 0;
+        for (int i = 0; i < canDo; i++)
+        {
+            if (!Active || Remaining <= 0)
+            {
+                break;
+            }
+
+            if (!AI_NpcProcess.TryCatchUpOne(worker, crafter, machine))
+            {
+                break;
+            }
+
+            did++;
+        }
+
+        Plugin.LogInfo(
+            $"processor return catch-up npc={NpcUid} elapsedMins={elapsedMins} minsPerCraft={minsPerCraft} (away x1/{AwaySpeedDivisor}) did={did} left={Remaining}");
+
+        if (!Active)
+        {
+            return;
+        }
+
+        if (Remaining <= 0)
+        {
+            // Catch-up finished the whole job while PC was away.
+            Clear("ai-end");
+            return;
+        }
+
+        // Still work left — resume freestanding AI on this map.
+        Suspended = false;
+        SuspendedAtRaw = 0;
+        try { ResumeIgnoreCancelUntilFrame = Time.frameCount + 3; } catch { ResumeIgnoreCancelUntilFrame = 0; }
+
+        string name = NpcName ?? NpcLabor.LaborText.T("proc.msg.residentFallback");
+        try
+        {
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.zoneResume", name, Remaining));
+        }
+        catch { }
+
+        try
+        {
+            worker.SetAIImmediate(new AI_NpcProcess
+            {
+                jobToken = NpcUid ^ MachineUid ^ Remaining
+            });
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogWarn("processor resume SetAI failed: " + ex.Message);
+            Clear("ai-set-fail", announce: false);
+        }
+    }
+
+
+    static void RefreshIngredientMarksFromLive()
+    {
+        if (Ingredients.Count == 0)
+        {
+            return;
+        }
+
+        if (IngredientMarks.Count != Ingredients.Count)
+        {
+            IngredientMarks.Clear();
+            for (int i = 0; i < Ingredients.Count; i++)
+            {
+                IngredientMarks.Add(IngredientMark.From(Ingredients[i]));
+            }
+            return;
+        }
+
+        for (int i = 0; i < Ingredients.Count; i++)
+        {
+            Thing? t = Ingredients[i];
+            if (t == null || t.isDestroyed)
+            {
+                continue;
+            }
+
+            IngredientMarks[i] = IngredientMark.From(t);
+        }
+    }
+
+    /// <summary>
+    /// Rebind Ingredients to live map Things after zone reload.
+    /// Prefer uid; fallback to machine-cell stacks matching id/material.
+    /// Returns false if any mark cannot be resolved to a live usable stack.
+    /// </summary>
+    internal static bool TryRebindIngredients(Card? machine)
+    {
+        Ingredients.Clear();
+
+        if (IngredientMarks.Count == 0)
+        {
+            return false;
+        }
+
+        HashSet<int> used = new HashSet<int>();
+        for (int i = 0; i < IngredientMarks.Count; i++)
+        {
+            IngredientMark mark = IngredientMarks[i];
+            Thing? live = ResolveIngredientMark(mark, machine, used);
+            if (live == null || live.isDestroyed || live.Num <= 0)
+            {
+                Ingredients.Clear();
+                return false;
+            }
+
+            try { used.Add(live.uid); } catch { }
+            ApplyParkFlags(live);
+            Ingredients.Add(live);
+            IngredientMarks[i] = IngredientMark.From(live);
+        }
+
+        return Ingredients.Count == IngredientMarks.Count && Ingredients.Count > 0;
+    }
+
+    static Thing? ResolveIngredientMark(IngredientMark mark, Card? machine, HashSet<int> used)
+    {
+        // 1) Exact uid on current map.
+        if (mark.Uid != 0)
+        {
+            Thing? byUid = null;
+            try
+            {
+                Card? c = FindCardByUid(mark.Uid);
+                byUid = c as Thing;
+            }
+            catch
+            {
+                byUid = null;
+            }
+
+            if (byUid != null && !byUid.isDestroyed && byUid.Num > 0)
+            {
+                int uid = 0;
+                try { uid = byUid.uid; } catch { }
+                if (uid == 0 || !used.Contains(uid))
+                {
+                    return byUid;
+                }
+            }
+        }
+
+        // 2) Machine cell stacks matching id + material (parked bulk).
+        if (machine != null && !machine.isDestroyed && machine.ExistsOnMap && machine.pos != null)
+        {
+            Thing? onCell = FindMatchingThingOnPoint(machine.pos, mark, used);
+            if (onCell != null)
+            {
+                return onCell;
+            }
+        }
+
+        // 3) Any map thing matching id + material, prefer ignoreAutoPick parked.
+        try
+        {
+            if (EClass._map?.things != null)
+            {
+                Thing? best = null;
+                foreach (Thing t in EClass._map.things)
+                {
+                    if (!MatchesMark(t, mark, used))
+                    {
+                        continue;
+                    }
+
+                    bool parked = false;
+                    try { parked = t.ignoreAutoPick; } catch { parked = false; }
+                    if (parked)
+                    {
+                        return t;
+                    }
+
+                    if (best == null)
+                    {
+                        best = t;
+                    }
+                }
+
+                if (best != null)
+                {
+                    return best;
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("resolve ingredient map scan: " + ex.Message);
+        }
+
+        return null;
+    }
+
+    static Thing? FindMatchingThingOnPoint(Point pos, IngredientMark mark, HashSet<int> used)
+    {
+        if (pos == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            List<Thing>? list = pos.Things;
+            if (list == null)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                Thing? t = list[i];
+                if (MatchesMark(t, mark, used))
+                {
+                    return t;
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("resolve ingredient cell: " + ex.Message);
+        }
+
+        return null;
+    }
+
+    static bool MatchesMark(Thing? t, IngredientMark mark, HashSet<int> used)
+    {
+        if (t == null || t.isDestroyed || t.Num <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (used != null && used.Contains(t.uid))
+            {
+                return false;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (!string.IsNullOrEmpty(mark.Id) && t.id != mark.Id)
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (mark.MaterialId != 0)
+        {
+            int mat = 0;
+            try { mat = t.material != null ? t.material.id : t.idMaterial; } catch { mat = 0; }
+            if (mat != 0 && mat != mark.MaterialId)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>After live Split/consume, keep marks in sync with current bulk uids.</summary>
+    internal static void SyncIngredientMarksAfterCraft()
+    {
+        if (Ingredients.Count == 0)
+        {
+            return;
+        }
+
+        if (IngredientMarks.Count != Ingredients.Count)
+        {
+            IngredientMarks.Clear();
+            for (int i = 0; i < Ingredients.Count; i++)
+            {
+                IngredientMarks.Add(IngredientMark.From(Ingredients[i]));
+            }
+            return;
+        }
+
+        for (int i = 0; i < Ingredients.Count; i++)
+        {
+            Thing? t = Ingredients[i];
+            if (t == null || t.isDestroyed || t.Num <= 0)
+            {
+                continue;
+            }
+
+            IngredientMarks[i] = IngredientMark.From(t);
+        }
+    }
+
     static void AnnounceFinish(string reason)
     {
         string name = NpcName ?? NpcLabor.LaborText.T("proc.msg.residentFallback");
 
-        if (reason == "reopen" || reason == "plugin-destroy" || reason == "ai-set-fail")
+        if (reason == "reopen" || reason == "plugin-destroy" || reason == "ai-set-fail" || reason == "zone-suspend")
         {
             return;
         }
@@ -523,4 +1285,3 @@ try
         }
     }
 }
-

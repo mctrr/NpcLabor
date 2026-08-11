@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using Newtonsoft.Json;
 
 namespace NpcLabor.TownLabor;
 
@@ -8,8 +9,13 @@ namespace NpcLabor.TownLabor;
 /// Not visible on quest board; not abandonable from journal (recall via labor UI).
 /// Hard fail goes through Quest.Fail() (vanilla fame/sound); success uses custom rewards.
 /// </summary>
-internal sealed class QuestNpcLaborTownLabor : Quest
+/// <remarks>
+/// Must stay public: vanilla GameIO uses TypeNameHandling.Auto. Internal types fail
+/// BindToType on load and become QuestDummy, which then collides with our re-created tracker.
+/// </remarks>
+public sealed class QuestNpcLaborTownLabor : Quest
 {
+    [JsonProperty]
     public int missionId;
 
     public override bool TrackOnStart => true;
@@ -106,12 +112,12 @@ internal sealed class QuestNpcLaborTownLabor : Quest
         TownLaborMission? m = Mission();
         if (m == null)
         {
-            return GetTitle() + "\n" + NpcLabor.LaborText.T("dis.q.ended");
+            // Title is drawn by ItemQuestTracker.textTitle; body must not re-emit it
+            // or the pin looks like two stacked trackers.
+            return NpcLabor.LaborText.T("dis.q.ended");
         }
 
         var sb = new StringBuilder();
-        sb.Append(GetTitle());
-        sb.Append('\n');
         sb.Append(m.isPcSelf
             ? NpcLabor.LaborText.T("town.you")
             : (string.IsNullOrEmpty(m.workerName) ? ("#" + m.uidWorker) : m.workerName));

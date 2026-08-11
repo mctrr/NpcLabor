@@ -153,9 +153,66 @@ internal static class ZoneChangeClearPatch
             CoCraftSession.Clear("zone-change");
         }
 
+        // Safety net after scene move. Real hold should already have run on Chara.MoveZone.
         if (ProcessorJobSession.Active)
         {
-            ProcessorJobSession.Clear("zone-change");
+            ProcessorJobSession.OnPcLeavingZone();
+        }
+    }
+}
+
+
+/// <summary>
+/// Early PC leave: hold resident process BEFORE map unload cancels freestanding AI.
+/// </summary>
+[HarmonyPatch(typeof(Chara), nameof(Chara.MoveZone), typeof(Zone), typeof(ZoneTransition))]
+internal static class ProcessorLeaveZonePatch
+{
+    [HarmonyPrefix]
+    [HarmonyPriority(Priority.Low)]
+    static void Prefix(Chara __instance, Zone z)
+    {
+        try
+        {
+            if (__instance == null || !__instance.IsPC)
+            {
+                return;
+            }
+
+            if (!ProcessorJobSession.Active || ProcessorJobSession.Suspended)
+            {
+                return;
+            }
+
+            if (z == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (__instance.currentZone != null && __instance.currentZone.uid == z.uid)
+                {
+                    return;
+                }
+            }
+            catch { }
+
+            // Town leave dialog may intercept first attempt — skip until confirmed.
+            try
+            {
+                if (TownLaborManager.ShouldConfirmLeave(z, out _))
+                {
+                    return;
+                }
+            }
+            catch { }
+
+            ProcessorJobSession.OnPcLeavingZone();
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("processor leave zone: " + ex.Message);
         }
     }
 }
@@ -182,6 +239,14 @@ internal static class TownLaborLeaveConfirmPatch
             if (_allowNextPcMove)
             {
                 _allowNextPcMove = false;
+                try
+                {
+                    if (ProcessorJobSession.Active)
+                    {
+                        ProcessorJobSession.OnPcLeavingZone();
+                    }
+                }
+                catch { }
                 return true;
             }
 
@@ -222,6 +287,14 @@ internal static class TownLaborLeaveConfirmPatch
                 try
                 {
                     _allowNextPcMove = true;
+                    try
+                    {
+                        if (ProcessorJobSession.Active)
+                        {
+                            ProcessorJobSession.OnPcLeavingZone();
+                        }
+                    }
+                    catch { }
                     if (EClass.pc != null && dest != null)
                     {
                         if (trans != null)

@@ -561,7 +561,7 @@ try
             return false;
         }
 
-        if (ProcessorJobSession.Active)
+        if (ProcessorJobSession.IsJobHeld())
         {
             Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.busy"));
             SE.BeepSmall();
@@ -646,7 +646,7 @@ try
     {
         try
         {
-            if (count <= 0 || ProcessorJobSession.Active || _startPending)
+            if (count <= 0 || ProcessorJobSession.IsJobHeld() || _startPending)
             {
                 return;
             }
@@ -701,29 +701,22 @@ try
                 claimed.Add(piece);
             }
 
-            // Keep claimed pieces on PC so they are not orphaned while UI closes.
-            if (EClass.pc != null)
+            // Park claimed pieces on the machine tile so bulk jobs do not overweight PC.
+            // Do not Pick into PC inventory here.
+            for (int i = 0; i < claimed.Count; i++)
             {
-                for (int i = 0; i < claimed.Count; i++)
+                Thing? piece = claimed[i];
+                if (piece == null || piece.isDestroyed)
                 {
-                    Thing? piece = claimed[i];
-                    if (piece == null || piece.isDestroyed)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    try
-                    {
-                        EClass.pc.Pick(piece, msg: false, tryStack: false);
-                    }
-                    catch
-                    {
-                        try
-                        {
-                            EClass.pc.AddThing(piece);
-                        }
-                        catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
-}
+                if (!ProcessorJobSession.ParkIngredientOnMachine(piece, crafter))
+                {
+                    Refund(claimed);
+                    Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.cannotTake"));
+                    SE.BeepSmall();
+                    return;
                 }
             }
 
@@ -775,26 +768,28 @@ try
             {
                 try
                 {
-                    if (EClass.pc != null)
+                    // Re-park if anything got unparented while the UI closed.
+                    for (int i = 0; i < claimedRef.Count; i++)
                     {
-                        for (int i = 0; i < claimedRef.Count; i++)
+                        Thing? piece = claimedRef[i];
+                        if (piece == null || piece.isDestroyed)
                         {
-                            Thing? piece = claimedRef[i];
-                            if (piece == null || piece.isDestroyed)
-                            {
-                                continue;
-                            }
+                            continue;
+                        }
 
-                            try
+                        if (!piece.ExistsOnMap)
+                        {
+                            if (!ProcessorJobSession.ParkIngredientOnMachine(piece, crafterRef))
                             {
-                                Card? root = piece.GetRootCard();
-                                if (root != EClass.pc)
-                                {
-                                    EClass.pc.Pick(piece, msg: false, tryStack: false);
-                                }
+                                Refund(claimedRef);
+                                SE.BeepSmall();
+                                return;
                             }
-                            catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
-}
+                        }
+                        else
+                        {
+                            ProcessorJobSession.ApplyParkFlags(piece);
+                        }
                     }
 
                     bool ok = ProcessorJobSession.TryStart(workerRef, crafterRef, claimedRef, countRef);
@@ -865,10 +860,10 @@ try
 
             try
             {
-                EClass.pc.Pick(t);
+                ProcessorJobSession.ReturnOneIngredientToPc(t);
             }
             catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
-}
+        }
     }
 
     static UIButton? FindOurButton(LayerDragGrid layer)

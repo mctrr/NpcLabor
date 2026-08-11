@@ -1186,12 +1186,10 @@ try
             return;
         }
 
-        try
-        {
-            RefreshTrackerQuests();
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-var snapshot = Missions.ToList();
+        // Do not RefreshTrackerQuests every hour. That path can QuestManager.Start a pin
+        // (journal spam / widget reorder). Tracker text reads live mission state already.
+        // Pin recovery is load / mission-start only.
+        var snapshot = Missions.ToList();
         foreach (DungeonDispatchMission m in snapshot)
         {
             try
@@ -2017,10 +2015,8 @@ if (c == null || c.isDead)
 
         try
         {
-            // Drop destroyed tracker rows before re-pinning dispatch quests on load.
-            SanitizeQuestTrackerItems();
+            // One typed pin per mission via quests.list only. Widget paints itself.
             RefreshTrackerQuests();
-            SanitizeQuestTrackerItems();
         }
         catch (Exception ex)
         {
@@ -2036,6 +2032,146 @@ if (c == null || c.isDead)
 }
 
 
+
+    internal static bool IsOurDispatchTrackerQuest(Quest? q)
+    {
+        if (q == null)
+        {
+            return false;
+        }
+
+        if (q is QuestNpcLaborDispatch)
+        {
+            return true;
+        }
+
+        try
+        {
+            string id = q.id ?? string.Empty;
+            if (id.StartsWith("npclabor_dispatch_", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        catch { }
+
+        // Legacy Dummy rows may lose idSource / type but keep title crumbs — still strip by type name.
+        try
+        {
+            string tn = q.GetType().Name ?? string.Empty;
+            if (tn.IndexOf("NpcLaborDispatch", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    /// <summary>
+    /// F9/auto-save: keep live typed pins so tracker order stays stable. Only drop
+    /// Dummy / missionId=0 / orphan / duplicate rows that would double on next load.
+    /// </summary>
+    internal static void SanitizeBrokenTrackerQuestsForSave()
+    {
+        try
+        {
+            QuestManager? qm = EClass.game?.quests;
+            if (qm?.list == null)
+            {
+                return;
+            }
+
+            var seen = new HashSet<int>();
+            foreach (Quest q in qm.list.ToList())
+            {
+                if (!IsOurDispatchTrackerQuest(q))
+                {
+                    continue;
+                }
+
+                int mid = 0;
+                bool typed = false;
+                try
+                {
+                    if (q is QuestNpcLaborDispatch dq)
+                    {
+                        typed = true;
+                        mid = dq.missionId;
+                    }
+                    else
+                    {
+                        string id = q.id ?? string.Empty;
+                        const string prefix = "npclabor_dispatch_";
+                        if (id.StartsWith(prefix, StringComparison.Ordinal))
+                        {
+                            int.TryParse(id.Substring(prefix.Length), out mid);
+                        }
+                    }
+                }
+                catch { mid = 0; }
+
+                bool orphan = mid <= 0 || FindByMissionId(mid) == null;
+                bool dup = mid > 0 && !seen.Add(mid);
+                // Always drop non-typed (QuestDummy / legacy) — typed live rows stay.
+                bool drop = !typed || orphan || dup;
+                if (!drop)
+                {
+                    try
+                    {
+                        if (q is QuestNpcLaborDispatch live)
+                        {
+                            live.track = true;
+                            live.deadline = 0;
+                            live.EnsureSafePerson();
+                        }
+                    }
+                    catch { }
+                    continue;
+                }
+
+                try { q.track = false; } catch { }
+                try { qm.Remove(q); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogDebug("dispatch sanitize broken trackers: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Ask vanilla WidgetQuestTracker to repaint from quests.list.
+    /// Never DestroyImmediate rows here — that caused SetActive NREs.
+    /// </summary>
+    internal static void RequestQuestTrackerRefresh()
+    {
+        try
+        {
+            if (WidgetQuestTracker.Instance != null)
+            {
+                WidgetQuestTracker.Instance.Refresh();
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogDebug("dispatch tracker refresh instance: " + ex.Message);
+        }
+
+        try
+        {
+            var w = EClass.ui?.widgets?.GetWidget("QuestTracker") as WidgetQuestTracker;
+            w?.Refresh();
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogDebug("dispatch tracker refresh widget: " + ex.Message);
+        }
+    }
+
+
     static void TryStartTrackerQuest(DungeonDispatchMission mission)
     {
         if (mission == null || mission.missionId <= 0)
@@ -2045,7 +2181,62 @@ if (c == null || c.isDead)
 
         try
         {
-            RemoveTrackerQuest(mission);
+            // Guard: never Start if a live pin already exists for this mission.
+            // Do not Remove+Start (that races the widget and can leave two rows).
+            try
+            {
+                QuestManager? qm = EClass.game?.quests;
+                if (qm?.list != null)
+                {
+                    foreach (Quest existing in qm.list)
+                    {
+                        if (existing is QuestNpcLaborDispatch dq && dq.missionId == mission.missionId)
+                        {
+                            try
+                            {
+                                dq.track = true;
+                                dq.deadline = 0;
+                                dq.isNew = false;
+                                dq.EnsureSafePerson();
+                            }
+                            catch { }
+                            // Same Quest object already in list — widget row already bound by ref.
+                            // Do not Show/Refresh here; that only races concurrent Refresh loops.
+                            return;
+                        }
+                    }
+
+                    // Drop Dummy/orphan rows for this id only (list-level, no widget destroy).
+                    string wantId = "npclabor_dispatch_" + mission.missionId;
+                    foreach (Quest orphan in qm.list.ToList())
+                    {
+                        if (orphan is QuestNpcLaborDispatch)
+                        {
+                            continue;
+                        }
+
+                        if (orphan == null)
+                        {
+                            continue;
+                        }
+
+                        bool match = false;
+                        try
+                        {
+                            match = string.Equals(orphan.id, wantId, StringComparison.Ordinal);
+                        }
+                        catch { match = false; }
+                        if (!match)
+                        {
+                            continue;
+                        }
+
+                        try { orphan.track = false; } catch { }
+                        try { qm.Remove(orphan); } catch { }
+                    }
+                }
+            }
+            catch { }
 
             var q = new QuestNpcLaborDispatch
             {
@@ -2059,12 +2250,13 @@ if (c == null || c.isDead)
                 q.Init();
             }
             catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-// deadline 0 = never expires (GameDate raw timestamp otherwise).
+            // deadline 0 = never expires (GameDate raw timestamp otherwise).
             // Setting hoursLeft here made multi-day dispatches "expire" in a few hours,
             // calling Quest.Fail → fame loss and recalling members out of the dungeon.
             q.deadline = 0;
             q.track = true;
-            q.isNew = true;
+            // isNew false: we are a synthetic pin, not a freshly accepted journal quest.
+            q.isNew = false;
 
             // Quest.chara / QuestManager.OnShowDialog dereference person — must be non-null
             // and must NOT bind a client NPC (would steal dialogs / NRE on null person).
@@ -2073,14 +2265,22 @@ if (c == null || c.isDead)
                 q.SetClient(null, assignQuest: false);
             }
             catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-q.EnsureSafePerson();
+            q.EnsureSafePerson();
 
-            EClass.game.quests.Start(q);
+            QuestManager? startQm = EClass.game?.quests;
+            if (startQm == null)
+            {
+                return;
+            }
+
+            startQm.Start(q);
             q.EnsureSafePerson();
             q.deadline = 0;
             q.track = true;
-            try { WidgetQuestTracker.Show(); } catch { }
-            RefreshQuestTrackerWidget();
+            q.isNew = false;
+            // List-only safety net in case Start raced another pin for the same id.
+            // Do not call WidgetQuestTracker.Refresh here — vanilla Start already Show()s.
+            DedupeNpcLaborTrackerQuests();
             Plugin.LogDebug("dispatch tracker quest start id=" + mission.missionId);
         }
         catch (Exception ex)
@@ -2104,27 +2304,50 @@ q.EnsureSafePerson();
                 return;
             }
 
+            string wantId = "npclabor_dispatch_" + mission.missionId;
             foreach (Quest q in qm.list.ToList())
             {
-                if (q is QuestNpcLaborDispatch dq && dq.missionId == mission.missionId)
+                bool match = false;
+                try
                 {
-                    try
+                    if (q is QuestNpcLaborDispatch dq && dq.missionId == mission.missionId)
                     {
-                        // Force pin off before remove so WidgetQuestTracker.ItemQuestTracker.Kill runs.
-                        dq.track = false;
+                        match = true;
                     }
-                    catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+                    else if (q != null && string.Equals(q.id, wantId, StringComparison.Ordinal))
+                    {
+                        // Legacy / QuestDummy rows that lost the concrete type or missionId.
+                        match = true;
+                    }
+                }
+                catch { }
+
+                if (!match)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    // Force pin off before remove so WidgetQuestTracker.ItemQuestTracker.Kill runs.
+                    if (q != null)
+                    {
+                        q.track = false;
+                    }
+                }
+                catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
+                try
+                {
+                    if (q != null)
                     {
                         qm.Remove(q);
                     }
-                    catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+                }
+                catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
             }
 
-            // Drop dead tracker rows first; then let vanilla rebuild remaining pins.
-            SanitizeQuestTrackerItems();
-            RefreshQuestTrackerWidget();
+            // Vanilla ItemQuestTracker.Refresh kills rows whose quest left the list.
+            RequestQuestTrackerRefresh();
         }
         catch (Exception ex)
         {
@@ -2136,142 +2359,179 @@ try
     /// QuestManager.Remove does not refresh WidgetQuestTracker. Force pin rows to drop
     /// when a dispatch quest ends (otherwise player must click the X manually).
     /// </summary>
-    static void RefreshQuestTrackerWidget()
-    {
-        try
-        {
-            SanitizeQuestTrackerItems();
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
-        {
-            if (WidgetQuestTracker.Instance != null)
-            {
-                WidgetQuestTracker.Instance.Refresh();
-                return;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
-        {
-            // Widget may exist under the widgets manager even if Instance is stale.
-            var w = EClass.ui?.widgets?.GetWidget("QuestTracker") as WidgetQuestTracker;
-            w?.Refresh();
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+    static void RefreshQuestTrackerWidget() => RequestQuestTrackerRefresh();
 
     /// <summary>
-    /// WidgetQuestTracker keeps destroyed ItemQuestTracker rows across load/remove.
-    /// Vanilla Refresh then NRE inside ItemQuestTracker.Kill (get_gameObject).
+    /// Drop extra live quests.list entries that share the same NpcLabor missionId
+    /// (typed or Dummy with our id prefix). Keeps one row per mission.
+    /// List-only — never DestroyImmediate widget rows.
     /// </summary>
-    internal static void SanitizeQuestTrackerItems()
+    internal static void DedupeNpcLaborTrackerQuests()
     {
         try
         {
-            WidgetQuestTracker? w = WidgetQuestTracker.Instance;
-            if (w == null)
-            {
-                try
-                {
-                    w = EClass.ui?.widgets?.GetWidget("QuestTracker") as WidgetQuestTracker;
-                }
-                catch
-                {
-                    w = null;
-                }
-            }
-
-            if (w?.items == null)
+            QuestManager? qm = EClass.game?.quests;
+            if (qm?.list == null)
             {
                 return;
             }
 
-            for (int i = w.items.Count - 1; i >= 0; i--)
+            var seenDispatch = new HashSet<int>();
+            var seenTown = new HashSet<int>();
+
+            foreach (Quest q in qm.list.ToList())
             {
-                ItemQuestTracker? row = null;
-                try { row = w.items[i]; } catch { row = null; }
-                bool dead = false;
-                try
-                {
-                    if (row == null)
-                    {
-                        dead = true;
-                    }
-                    else
-                    {
-                        ItemQuestTracker live = row;
-                        // Unity fake-null / destroyed component.
-                        dead = live.Equals(null);
-                        if (!dead)
-                        {
-                            try
-                            {
-                                UnityEngine.GameObject? go = live!.gameObject;
-                                if (go == null)
-                                {
-                                    dead = true;
-                                }
-                            }
-                            catch
-                            {
-                                dead = true;
-                            }
-                        }
-
-                        if (!dead)
-                        {
-                            try
-                            {
-                                Quest? q = live!.quest;
-                                if (q == null || !q.track)
-                                {
-                                    dead = true;
-                                }
-                                else
-                                {
-                                    QuestManager? qm = EClass.game?.quests;
-                                    if (qm?.list == null || !qm.list.Contains(q))
-                                    {
-                                        dead = true;
-                                    }
-                                }
-                            }
-                            catch
-                            {
-                                dead = true;
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                    dead = true;
-                }
-
-                if (!dead)
+                if (q == null)
                 {
                     continue;
                 }
 
-                try { w.items.RemoveAt(i); } catch { }
+                bool isDispatch = IsOurDispatchTrackerQuest(q);
+                bool isTown = false;
+                try { isTown = TownLaborManager.IsOurTownTrackerQuestPublic(q); } catch { isTown = false; }
+                if (!isDispatch && !isTown)
+                {
+                    continue;
+                }
+
+                int mid = 0;
+                bool typed = false;
                 try
                 {
-                    if (row != null)
+                    if (q is QuestNpcLaborDispatch dq)
                     {
-                        UnityEngine.Object.DestroyImmediate(row.gameObject);
+                        typed = true;
+                        mid = dq.missionId;
+                    }
+                    else if (q is QuestNpcLaborTownLabor tq)
+                    {
+                        typed = true;
+                        mid = tq.missionId;
+                    }
+                    else
+                    {
+                        string id = q.id ?? string.Empty;
+                        const string dPrefix = "npclabor_dispatch_";
+                        const string tPrefix = "npclabor_townlabor_";
+                        if (id.StartsWith(dPrefix, StringComparison.Ordinal))
+                        {
+                            int.TryParse(id.Substring(dPrefix.Length), out mid);
+                        }
+                        else if (id.StartsWith(tPrefix, StringComparison.Ordinal))
+                        {
+                            int.TryParse(id.Substring(tPrefix.Length), out mid);
+                        }
                     }
                 }
-                catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+                catch { mid = 0; }
 
-    internal static void RefreshTrackerQuests()
+                bool orphan;
+                bool dup;
+                if (isDispatch)
+                {
+                    orphan = mid <= 0 || FindByMissionId(mid) == null;
+                    dup = mid > 0 && !seenDispatch.Add(mid);
+                }
+                else
+                {
+                    orphan = mid <= 0 || TownLaborManager.FindByMissionId(mid) == null;
+                    dup = mid > 0 && !seenTown.Add(mid);
+                }
+
+                // Prefer typed live rows. Non-typed / orphan / dup always drop.
+                bool drop = !typed || orphan || dup;
+                if (!drop)
+                {
+                    try
+                    {
+                        if (q is QuestNpcLaborDispatch liveD)
+                        {
+                            liveD.track = true;
+                            liveD.deadline = 0;
+                            liveD.EnsureSafePerson();
+                        }
+                        else if (q is QuestNpcLaborTownLabor liveT)
+                        {
+                            liveT.track = true;
+                            liveT.deadline = 0;
+                            liveT.EnsureSafePerson();
+                        }
+                    }
+                    catch { }
+                    continue;
+                }
+
+                try { q.track = false; } catch { }
+                try { qm.Remove(q); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogDebug("dispatch dedupe trackers: " + ex.Message);
+        }
+    }
+
+
+internal static void RefreshTrackerQuests()
     {
         try
         {
+            // First pass: drop orphan / legacy / duplicate pins so we never keep two rows.
+            try
+            {
+                QuestManager? qm = EClass.game?.quests;
+                if (qm?.list != null)
+                {
+                    var seen = new HashSet<int>();
+                    bool removed = false;
+                    foreach (Quest q in qm.list.ToList())
+                    {
+                        if (!IsOurDispatchTrackerQuest(q))
+                        {
+                            continue;
+                        }
+
+                        int mid = 0;
+                        try
+                        {
+                            if (q is QuestNpcLaborDispatch dq)
+                            {
+                                mid = dq.missionId;
+                            }
+                            else
+                            {
+                                string id = q.id ?? string.Empty;
+                                const string prefix = "npclabor_dispatch_";
+                                if (id.StartsWith(prefix, StringComparison.Ordinal))
+                                {
+                                    int.TryParse(id.Substring(prefix.Length), out mid);
+                                }
+                            }
+                        }
+                        catch { mid = 0; }
+
+                        bool typed = q is QuestNpcLaborDispatch;
+                        bool orphan = mid <= 0 || FindByMissionId(mid) == null;
+                        bool dup = mid > 0 && !seen.Add(mid);
+                        // Keep only one live typed pin; Dummy/legacy always drop and re-Start.
+                        if (typed && !orphan && !dup)
+                        {
+                            continue;
+                        }
+
+                        try { q.track = false; } catch { }
+                        try { qm.Remove(q); } catch { }
+                        removed = true;
+                    }
+
+                    if (removed)
+                    {
+                        // Defer paint; Start/Show below will refresh once.
+                    }
+                }
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
+
             foreach (DungeonDispatchMission m in Missions)
             {
                 bool has = false;
@@ -2292,44 +2552,20 @@ try
                                     dq.EnsureSafePerson();
                                 }
                                 catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-break;
+                                break;
                             }
                         }
                     }
                 }
                 catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-if (!has)
+                if (!has)
                 {
                     TryStartTrackerQuest(m);
                 }
             }
-
-            try
-            {
-                QuestManager? qm = EClass.game?.quests;
-                if (qm?.list != null)
-                {
-                    bool removedOrphan = false;
-                    foreach (Quest q in qm.list.ToList())
-                    {
-                        if (q is QuestNpcLaborDispatch dq && FindByMissionId(dq.missionId) == null)
-                        {
-                            try { dq.track = false; } catch { }
-                            try { qm.Remove(q); } catch { }
-                            removedOrphan = true;
-                        }
-                    }
-
-                    if (removedOrphan)
-                    {
-                        RefreshQuestTrackerWidget();
-                    }
-                }
-            }
-            catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+        }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+    }
 
     /// <summary>
     /// Debug: dump planned full success harvest for every active mission.

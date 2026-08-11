@@ -673,7 +673,7 @@ list.Sort((a, b) =>
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
 try
         {
-            if (ProcessorJobSession.Active)
+            if (ProcessorJobSession.IsJobHeld())
             {
                 return NpcLabor.LaborText.T("town.error.busyProcess", NpcLabor.LaborTerms.Process);
             }
@@ -1147,12 +1147,9 @@ var mission = new TownLaborMission
             return;
         }
 
-        try
-        {
-            RefreshTrackerQuests();
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-var snapshot = Missions.ToList();
+        // Do not RefreshTrackerQuests every hour (QuestManager.Start / journal spam / dups).
+        // Tracker text already reads live mission progress.
+        var snapshot = Missions.ToList();
         foreach (TownLaborMission m in snapshot)
         {
             try
@@ -2107,11 +2104,9 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
-            DungeonDispatchManager.SanitizeQuestTrackerItems();
             RefreshTrackerQuests();
-            DungeonDispatchManager.SanitizeQuestTrackerItems();
         }
         catch (Exception ex)
         {
@@ -2361,13 +2356,130 @@ StartPcSelfApproach(m, pc);
                 }
             }
 
-            DungeonDispatchManager.SanitizeQuestTrackerItems();
-            RefreshQuestTrackerWidget();
+                        RefreshQuestTrackerWidget();
         }
         catch (Exception ex)
         {
             Plugin.LogDebug("townlabor tracker fail remove: " + ex.Message);
             try { RemoveTrackerQuest(mission); } catch { }
+        }
+    }
+
+    
+
+    internal static bool IsOurTownTrackerQuestPublic(Quest? q) => IsOurTownTrackerQuest(q);
+
+    internal static bool IsOurTownTrackerQuest(Quest? q)
+    {
+        if (q == null)
+        {
+            return false;
+        }
+
+        if (q is QuestNpcLaborTownLabor)
+        {
+            return true;
+        }
+
+        try
+        {
+            string id = q.id ?? string.Empty;
+            if (id.StartsWith("npclabor_townlabor_", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        catch { }
+
+        try
+        {
+            string tn = q.GetType().Name ?? string.Empty;
+            if (tn.IndexOf("NpcLaborTownLabor", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    /// <summary>
+    /// F9/auto-save: keep live typed town pins. Drop Dummy / orphan / dups only.
+    /// </summary>
+    internal static void SanitizeBrokenTrackerQuestsForSave()
+    {
+        try
+        {
+            QuestManager? qm = EClass.game?.quests;
+            if (qm?.list == null)
+            {
+                return;
+            }
+
+            var live = new HashSet<int>();
+            foreach (TownLaborMission m in Missions)
+            {
+                if (m != null && m.missionId > 0)
+                {
+                    live.Add(m.missionId);
+                }
+            }
+
+            var seen = new HashSet<int>();
+            foreach (Quest q in qm.list.ToList())
+            {
+                if (!IsOurTownTrackerQuest(q))
+                {
+                    continue;
+                }
+
+                int mid = 0;
+                bool typed = false;
+                try
+                {
+                    if (q is QuestNpcLaborTownLabor tq)
+                    {
+                        typed = true;
+                        mid = tq.missionId;
+                    }
+                    else
+                    {
+                        string id = q.id ?? string.Empty;
+                        const string prefix = "npclabor_townlabor_";
+                        if (id.StartsWith(prefix, StringComparison.Ordinal))
+                        {
+                            int.TryParse(id.Substring(prefix.Length), out mid);
+                        }
+                    }
+                }
+                catch { mid = 0; }
+
+                bool orphan = mid <= 0 || !live.Contains(mid);
+                bool dup = mid > 0 && !seen.Add(mid);
+                bool drop = !typed || orphan || dup;
+                if (!drop)
+                {
+                    try
+                    {
+                        if (q is QuestNpcLaborTownLabor liveQ)
+                        {
+                            liveQ.track = true;
+                            liveQ.deadline = 0;
+                            liveQ.EnsureSafePerson();
+                        }
+                    }
+                    catch { }
+                    continue;
+                }
+
+                try { q.track = false; } catch { }
+                try { qm.Remove(q); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogDebug("townlabor sanitize broken trackers: " + ex.Message);
         }
     }
 
@@ -2380,7 +2492,61 @@ StartPcSelfApproach(m, pc);
 
         try
         {
-            RemoveTrackerQuest(mission);
+            // Guard: never Start if a live pin already exists.
+            // Do not Remove+Start (widget race / double pin).
+            try
+            {
+                QuestManager? qm = EClass.game?.quests;
+                if (qm?.list != null)
+                {
+                    foreach (Quest existing in qm.list)
+                    {
+                        if (existing is QuestNpcLaborTownLabor tq && tq.missionId == mission.missionId)
+                        {
+                            try
+                            {
+                                tq.track = true;
+                                tq.deadline = 0;
+                                tq.isNew = false;
+                                tq.EnsureSafePerson();
+                            }
+                            catch { }
+                            // Same Quest object already in list — widget row already bound by ref.
+                            return;
+                        }
+                    }
+
+                    string wantId = "npclabor_townlabor_" + mission.missionId;
+                    foreach (Quest orphan in qm.list.ToList())
+                    {
+                        if (orphan is QuestNpcLaborTownLabor)
+                        {
+                            continue;
+                        }
+
+                        if (orphan == null)
+                        {
+                            continue;
+                        }
+
+                        bool match = false;
+                        try
+                        {
+                            match = string.Equals(orphan.id, wantId, StringComparison.Ordinal);
+                        }
+                        catch { match = false; }
+                        if (!match)
+                        {
+                            continue;
+                        }
+
+                        try { orphan.track = false; } catch { }
+                        try { qm.Remove(orphan); } catch { }
+                    }
+                }
+            }
+            catch { }
+
             var q = new QuestNpcLaborTownLabor
             {
                 missionId = mission.missionId,
@@ -2390,15 +2556,22 @@ StartPcSelfApproach(m, pc);
             try { q.Init(); } catch { }
             q.deadline = 0;
             q.track = true;
-            q.isNew = true;
+            q.isNew = false;
             try { q.SetClient(null, assignQuest: false); } catch { }
             q.EnsureSafePerson();
-            EClass.game.quests.Start(q);
+            QuestManager? startQm = EClass.game?.quests;
+            if (startQm == null)
+            {
+                return;
+            }
+
+            startQm.Start(q);
             q.EnsureSafePerson();
             q.deadline = 0;
             q.track = true;
-            try { WidgetQuestTracker.Show(); } catch { }
-            RefreshQuestTrackerWidget();
+            q.isNew = false;
+            DungeonDispatchManager.DedupeNpcLaborTrackerQuests();
+            // Vanilla Start already Show()s the pin; do not thrash WidgetQuestTracker.
         }
         catch (Exception ex)
         {
@@ -2421,16 +2594,33 @@ StartPcSelfApproach(m, pc);
                 return;
             }
 
+            string wantId = "npclabor_townlabor_" + mission.missionId;
             foreach (Quest q in qm.list.ToList())
             {
-                if (q is QuestNpcLaborTownLabor tq && tq.missionId == mission.missionId)
+                bool match = false;
+                try
                 {
-                    try { tq.track = false; } catch { }
-                    try { qm.Remove(q); } catch { }
+                    if (q is QuestNpcLaborTownLabor tq && tq.missionId == mission.missionId)
+                    {
+                        match = true;
+                    }
+                    else if (q != null && string.Equals(q.id, wantId, StringComparison.Ordinal))
+                    {
+                        match = true;
+                    }
                 }
+                catch { }
+
+                if (!match || q == null)
+                {
+                    continue;
+                }
+
+                try { q.track = false; } catch { }
+                try { qm.Remove(q); } catch { }
             }
 
-            DungeonDispatchManager.SanitizeQuestTrackerItems();
+            // Vanilla kills widget rows whose quest left the list.
             RefreshQuestTrackerWidget();
         }
         catch (Exception ex)
@@ -2439,9 +2629,14 @@ StartPcSelfApproach(m, pc);
         }
     }
 
+    internal static void RefreshTrackerQuestsPublic()
+    {
+        RefreshTrackerQuests();
+    }
+
     static void RefreshTrackerQuests()
     {
-        // Ensure every mission has a tracker; drop orphans.
+        // Ensure every mission has exactly one tracker; drop orphans/dups/legacy.
         try
         {
             QuestManager? qm = EClass.game?.quests;
@@ -2453,13 +2648,43 @@ StartPcSelfApproach(m, pc);
 
             if (qm?.list != null)
             {
+                var seen = new HashSet<int>();
                 foreach (Quest q in qm.list.ToList())
                 {
-                    if (q is QuestNpcLaborTownLabor tq && !live.Contains(tq.missionId))
+                    if (!IsOurTownTrackerQuest(q))
                     {
-                        try { tq.track = false; } catch { }
-                        try { qm.Remove(q); } catch { }
+                        continue;
                     }
+
+                    int mid = 0;
+                    try
+                    {
+                        if (q is QuestNpcLaborTownLabor tq)
+                        {
+                            mid = tq.missionId;
+                        }
+                        else
+                        {
+                            string id = q.id ?? string.Empty;
+                            const string prefix = "npclabor_townlabor_";
+                            if (id.StartsWith(prefix, StringComparison.Ordinal))
+                            {
+                                int.TryParse(id.Substring(prefix.Length), out mid);
+                            }
+                        }
+                    }
+                    catch { mid = 0; }
+
+                    bool typed = q is QuestNpcLaborTownLabor;
+                    bool orphan = mid <= 0 || !live.Contains(mid);
+                    bool dup = mid > 0 && !seen.Add(mid);
+                    if (typed && !orphan && !dup)
+                    {
+                        continue;
+                    }
+
+                    try { q.track = false; } catch { }
+                    try { qm.Remove(q); } catch { }
                 }
             }
 
@@ -2473,6 +2698,13 @@ StartPcSelfApproach(m, pc);
                         if (q is QuestNpcLaborTownLabor tq && tq.missionId == m.missionId)
                         {
                             has = true;
+                            try
+                            {
+                                tq.track = true;
+                                tq.deadline = 0;
+                                tq.EnsureSafePerson();
+                            }
+                            catch { }
                             break;
                         }
                     }
@@ -2485,32 +2717,12 @@ StartPcSelfApproach(m, pc);
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-RefreshQuestTrackerWidget();
     }
 
     static void RefreshQuestTrackerWidget()
     {
-        try
-        {
-            DungeonDispatchManager.SanitizeQuestTrackerItems();
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
-        {
-            if (WidgetQuestTracker.Instance != null)
-            {
-                WidgetQuestTracker.Instance.Refresh();
-                return;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
-        {
-            var w = EClass.ui?.widgets?.GetWidget("QuestTracker") as WidgetQuestTracker;
-            w?.Refresh();
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-}
+        DungeonDispatchManager.RequestQuestTrackerRefresh();
+    }
 
     /// <summary>Debug: finish all active town labor as success.</summary>
     internal static int DebugCompleteAll()

@@ -20,7 +20,8 @@ internal class AI_NpcProcess : AIAct
     {
         if (ProcessorJobSession.Active && owner != null && owner.uid == ProcessorJobSession.NpcUid)
         {
-            ProcessorJobSession.Clear("ai-cancel");
+            // Leave/unload cancels freestanding AI — hold resident job instead of wiping.
+            ProcessorJobSession.HandleAiInterrupted("ai-cancel");
         }
     }
 
@@ -28,8 +29,12 @@ internal class AI_NpcProcess : AIAct
     {
         if (ProcessorJobSession.Active && owner != null && owner.uid == ProcessorJobSession.NpcUid)
         {
-            // Only clear if the session still belongs to us and remaining is 0 or we finished cleanly.
-            if (ProcessorJobSession.Remaining <= 0 || !ProcessorJobSession.Active)
+            if (ProcessorJobSession.Suspended)
+            {
+                return;
+            }
+
+            if (ProcessorJobSession.Remaining <= 0)
             {
                 ProcessorJobSession.Clear("ai-end");
             }
@@ -38,7 +43,8 @@ internal class AI_NpcProcess : AIAct
 
     public override IEnumerable<Status> Run()
     {
-        if (!ProcessorJobSession.Active || owner == null || owner.uid != ProcessorJobSession.NpcUid)
+        if (!ProcessorJobSession.Active || ProcessorJobSession.Suspended
+            || owner == null || owner.uid != ProcessorJobSession.NpcUid)
         {
             yield return Success();
             yield break;
@@ -83,7 +89,7 @@ internal class AI_NpcProcess : AIAct
             catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
 }
 
-        while (ProcessorJobSession.Active && ProcessorJobSession.Remaining > 0)
+        while (ProcessorJobSession.Active && !ProcessorJobSession.Suspended && ProcessorJobSession.Remaining > 0)
         {
             crafter = ProcessorJobSession.GetCrafter();
             machine = crafter?.owner;
@@ -194,15 +200,18 @@ internal class AI_NpcProcess : AIAct
                         Point place = machine.ExistsOnMap ? machine.pos : owner.pos;
                         Card card = EClass._zone.AddCard(piece, place);
                         card.altitude = machine.ExistsOnMap ? 0 : 1;
-                        if (crafter.animeType == TraitCrafter.AnimeType.Microwave)
-                        {
-                            card.isHidden = true;
-                        }
+                        // Split may copy hide flags from parked bulk; re-apply craft-visible rules.
+                        ProcessorJobSession.PrepareCraftPiece(card as Thing ?? piece, crafter);
                     }
                     catch (System.Exception ex)
                     {
                         Plugin.LogWarn("place ingredient failed: " + ex.Message);
                     }
+                }
+                else
+                {
+                    // Non-consume path still keeps the piece out of PC bag.
+                    ProcessorJobSession.PrepareCraftPiece(piece, crafter);
                 }
             }
 
@@ -238,6 +247,7 @@ internal class AI_NpcProcess : AIAct
 
             int costSp = ProcessorJobSession.AdjustCostSp(baseSp);
             int duration = ComputeDuration(crafter, shell, costSp);
+            ProcessorJobSession.RememberCraftTiming(duration, costSp);
 
             if (!crafter.idSoundBG.IsEmpty())
             {
@@ -322,7 +332,7 @@ foreach (Thing ing2 in ings)
                 {
                     CompleteOne(owner, crafter, machine, shell, ings, blessed, costSp, duration);
                 }
-            }.SetDuration(duration, 5);
+            }.SetDuration(duration, 2);
 
             try
             {
@@ -335,7 +345,7 @@ yield return Do(progress);
             {
                 // Return leftover non-destroyed ings to PC.
                 ReturnIngs(ings);
-                ProcessorJobSession.Clear("ai-fail");
+                ProcessorJobSession.HandleAiInterrupted("ai-fail");
                 yield return Cancel();
                 yield break;
             }
@@ -352,8 +362,8 @@ yield return Do(progress);
             }
         }
 
-        // Clean end of loop.
-        if (ProcessorJobSession.Active)
+        // Clean end of loop (suspend exits while via !Active/Suspended — do not Clear held jobs).
+        if (ProcessorJobSession.Active && !ProcessorJobSession.Suspended && ProcessorJobSession.Remaining <= 0)
         {
             TraitCrafter? c2 = ProcessorJobSession.GetCrafter();
             if (c2 != null && c2.AutoTurnOff && c2.owner != null && c2.owner.isOn)
@@ -382,27 +392,28 @@ yield return Do(progress);
 
     static int ComputeDuration(TraitCrafter crafter, AI_UseCrafter shell, int costSp)
     {
-        // Mirror TraitCrafter.GetDuration but use NPC skill instead of EClass.pc.
+        // Mirror TraitCrafter.GetDuration but use NPC skill instead of EClass.pc,
+        // then cut NPC process duration in half vs the skill-scaled base.
         try
         {
             SourceRecipe.Row? src = crafter.GetSource(shell);
             if (src == null)
             {
-                return Mathf.Max(1, 10);
+                return ProcessorJobSession.ApplyNpcDurationCut(10);
             }
 
             int skill = ProcessorJobSession.NpcSkill;
-            return Mathf.Max(1, src.time * 100 / (80 + skill * 5));
+            return ProcessorJobSession.ApplyNpcDurationCut(src.time * 100 / (80 + skill * 5));
         }
         catch
         {
             try
             {
-                return Mathf.Max(1, crafter.GetDuration(shell, costSp));
+                return ProcessorJobSession.ApplyNpcDurationCut(crafter.GetDuration(shell, costSp));
             }
             catch
             {
-                return 10;
+                return ProcessorJobSession.ApplyNpcDurationCut(10);
             }
         }
     }
@@ -431,9 +442,11 @@ try
         }
         catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
 int exp = 0;
+        bool craftedOk = false;
+        Thing? spawnedProduct = null;
         try
         {
-            // recipe is always null for processors — conversion path.
+            // recipe is always null for processors - conversion path.
             Thing? product = crafter.Craft(shell);
             if (product != null)
             {
@@ -445,63 +458,111 @@ int exp = 0;
                     }
                 }
                 catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-try
+                try
                 {
                     product.PlaySoundDrop(spatial: false);
                 }
                 catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-Point dropAt = (machine != null && machine.ExistsOnMap) ? machine.pos : owner.pos;
+                Point dropAt = (machine != null && machine.ExistsOnMap) ? machine.pos : owner.pos;
                 EClass._zone.AddCard(product, dropAt);
                 try
                 {
                     product.Identify(show: false);
                 }
                 catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-// Slice B rule: product on ground — do not auto-pick to NPC or PC.
+                // Slice B rule: product on ground - do not auto-pick to NPC or PC.
+                spawnedProduct = product;
+                craftedOk = true;
             }
         }
         catch (System.Exception ex)
         {
             Plugin.LogWarn("processor Craft failed: " + ex.Message);
+            craftedOk = false;
         }
 
-        // Consume ingredients that should be consumed.
+        // Consume craft pieces. MVP processors are IsConsumeIng; always Destroy pieces
+        // so a null GetSource cannot skip consume and leave free mats / free products.
+        bool consumedOk = true;
         try
         {
-            SourceRecipe.Row? source = crafter.GetSource(shell);
-            for (int m = 0; m < ings.Count; m++)
-            {
-                if (crafter.ShouldConsumeIng(source, m))
-                {
-                    try
-                    {
-                        ings[m].Destroy();
-                    }
-                    catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-}
-            }
+            bool isConsume;
+            try { isConsume = crafter.IsConsumeIng; } catch { isConsume = true; }
 
-            foreach (Thing ing3 in ings)
+            if (isConsume)
             {
-                if (ing3 != null && !ing3.isDestroyed && ing3.ExistsOnMap)
+                consumedOk = ings.Count > 0;
+                for (int m = 0; m < ings.Count; m++)
                 {
-                    // Leftover non-consumed (rare for MVP machines) — leave on ground near machine,
-                    // or pick to PC via session return list is not tracking these pieces.
-                    // Prefer pick to PC so they are not lost.
+                    Thing? piece = ings[m];
+                    if (piece == null)
+                    {
+                        consumedOk = false;
+                        continue;
+                    }
+
+                    if (piece.isDestroyed)
+                    {
+                        continue;
+                    }
+
                     try
                     {
-                        if (EClass.pc != null)
-                        {
-                            EClass.pc.Pick(ing3);
-                        }
+                        piece.Destroy();
                     }
-                    catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-}
+                    catch (System.Exception __e)
+                    {
+                        Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message);
+                        consumedOk = false;
+                    }
+
+                    if (!piece.isDestroyed)
+                    {
+                        consumedOk = false;
+                    }
+                }
+            }
+            else
+            {
+                // Non-consume machines: return leftover pieces to PC.
+                foreach (Thing ing3 in ings)
+                {
+                    if (ing3 != null && !ing3.isDestroyed && ing3.ExistsOnMap)
+                    {
+                        try { ProcessorJobSession.ReturnOneIngredientToPc(ing3); }
+                        catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
+                    }
+                }
             }
         }
         catch (System.Exception ex)
         {
             Plugin.LogDebug("consume ings: " + ex.Message);
+            consumedOk = false;
+        }
+
+        // Integrity: never credit a craft that did not both produce and consume when required.
+        if (craftedOk && !consumedOk)
+        {
+            Plugin.LogWarn("processor product without consume - destroying product, no NoteCompleted");
+            try
+            {
+                if (spawnedProduct != null && !spawnedProduct.isDestroyed)
+                {
+                    spawnedProduct.Destroy();
+                }
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
+            ProcessorJobSession.SyncIngredientMarksAfterCraft();
+            return;
+        }
+
+        if (!craftedOk)
+        {
+            // No product: do not advance Remaining (mats already Split from bulk; pieces
+            // destroyed above if isConsume - rare GetSource miss). Avoid free progress.
+            ProcessorJobSession.SyncIngredientMarksAfterCraft();
+            return;
         }
 
         if (crafter.IsRequireFuel && machine != null)
@@ -516,7 +577,7 @@ Point dropAt = (machine != null && machine.ExistsOnMap) ? machine.pos : owner.po
                 }
             }
             catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-}
+        }
 
         try
         {
@@ -532,15 +593,14 @@ Point dropAt = (machine != null && machine.ExistsOnMap) ? machine.pos : owner.po
 
             if (skillId != 0 && owner.elements != null)
             {
+                // costSp is kept only for exp scaling; process jobs no longer spend SP.
                 exp = costSp * 12 * (100 + duration * 2) / 100;
                 owner.elements.ModExp(skillId, exp);
             }
-
-            owner.stamina.Mod(-costSp);
         }
         catch (System.Exception ex)
         {
-            Plugin.LogDebug("exp/sp failed: " + ex.Message);
+            Plugin.LogDebug("exp failed: " + ex.Message);
             exp = 0;
         }
 
@@ -551,9 +611,225 @@ Point dropAt = (machine != null && machine.ExistsOnMap) ? machine.pos : owner.po
             owner.renderer.PlayAnime(AnimeID.JumpSmall);
         }
         catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-ProcessorJobSession.NoteCompleted(exp);
+        ProcessorJobSession.NoteCompleted(exp);
+        ProcessorJobSession.SyncIngredientMarksAfterCraft();
         Plugin.LogDebug(
             $"processor tick done={ProcessorJobSession.Completed} left={ProcessorJobSession.Remaining} exp+{exp}");
+    }
+
+    /// <summary>
+    /// One conversion cycle for return catch-up (no progress anime). Uses parked bulk on machine.
+    /// Returns false if ingredients/fuel/machine cannot complete another craft.
+    /// </summary>
+    internal static bool TryCatchUpOne(Chara worker, TraitCrafter crafter, Card machine)
+    {
+        if (worker == null || worker.isDead || crafter == null || machine == null || machine.isDestroyed)
+        {
+            return false;
+        }
+
+        if (!ProcessorJobSession.Active || ProcessorJobSession.Remaining <= 0)
+        {
+            return false;
+        }
+
+        List<Thing> sources = ProcessorJobSession.Ingredients;
+        if (sources == null || sources.Count == 0)
+        {
+            return false;
+        }
+
+        // Catch-up must use live map stacks only. Ghost refs after unload would Split
+        // in memory and leave the real parked bulk untouched (= free product / dupe).
+        int[] numsBefore = new int[sources.Count];
+        for (int i = 0; i < sources.Count; i++)
+        {
+            Thing? s = sources[i];
+            if (s == null || s.isDestroyed || s.Num <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!s.ExistsOnMap && crafter.IsConsumeIng)
+                {
+                    Plugin.LogDebug("catch-up abort: ingredient not on map uid=" + s.uid);
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            numsBefore[i] = s.Num;
+        }
+
+        List<Thing> targets = new List<Thing>(sources);
+        try
+        {
+            if (!crafter.IsFuelEnough(1, targets))
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        int remainingBefore = ProcessorJobSession.Remaining;
+        int completedBefore = ProcessorJobSession.Completed;
+        List<Thing> ings = new List<Thing>();
+        BlessedState blessed = BlessedState.Normal;
+        try
+        {
+            for (int i = 0; i < sources.Count; i++)
+            {
+                Thing src = sources[i];
+                int numBeforeSplit = src.Num;
+                Thing? piece = null;
+                try { piece = src.Split(1); } catch { piece = null; }
+                if (piece == null || piece.isDestroyed)
+                {
+                    CleanupPartialIngs(ings);
+                    return false;
+                }
+
+                // If Split returned the same full stack object without decreasing Num,
+                // bulk accounting is wrong - abort rather than craft free goods.
+                if (ReferenceEquals(piece, src) && numBeforeSplit <= 1)
+                {
+                    // Last unit: vanilla Split returns the same Thing; Num stays 1 until Destroy.
+                }
+                else if (!ReferenceEquals(piece, src) && src.Num != numBeforeSplit - 1 && src.Num != numBeforeSplit)
+                {
+                    // Unexpected; continue with Destroy path but log.
+                    Plugin.LogDebug($"catch-up split num odd before={numBeforeSplit} after={src.Num}");
+                }
+                else if (ReferenceEquals(piece, src) && numBeforeSplit > 1)
+                {
+                    CleanupPartialIngs(ings);
+                    Plugin.LogDebug("catch-up abort: Split returned whole stack unexpectedly");
+                    return false;
+                }
+
+                ings.Add(piece);
+                if (piece.blessedState <= BlessedState.Cursed && blessed > piece.blessedState)
+                {
+                    blessed = piece.blessedState;
+                }
+                if (piece.blessedState > BlessedState.Normal && blessed == BlessedState.Normal)
+                {
+                    blessed = piece.blessedState;
+                }
+
+                if (crafter.IsConsumeIng)
+                {
+                    try
+                    {
+                        Point place = machine.ExistsOnMap ? machine.pos : worker.pos;
+                        if (EClass._zone != null)
+                        {
+                            // Last-unit Split returns the parked bulk itself; it is already on map.
+                            if (!piece.ExistsOnMap)
+                            {
+                                Card card = EClass._zone.AddCard(piece, place);
+                                try { card.altitude = machine.ExistsOnMap ? 0 : 1; } catch { }
+                                ProcessorJobSession.PrepareCraftPiece(card as Thing ?? piece, crafter);
+                            }
+                            else
+                            {
+                                ProcessorJobSession.PrepareCraftPiece(piece, crafter);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        CleanupPartialIngs(ings);
+                        return false;
+                    }
+                }
+                else
+                {
+                    ProcessorJobSession.PrepareCraftPiece(piece, crafter);
+                }
+            }
+
+            bool requireOn = crafter.IsRequireFuel || crafter.ToggleType != ToggleType.None;
+            if (requireOn && !machine.isOn)
+            {
+                try { crafter.Toggle(on: true); } catch { }
+            }
+
+            AI_UseCrafter shell = new AI_UseCrafter
+            {
+                crafter = crafter,
+                recipe = null,
+                num = 1,
+                ings = ings,
+                owner = worker
+            };
+
+            int baseSp;
+            try { baseSp = crafter.GetCostSp(shell); }
+            catch { baseSp = crafter.CostSP; }
+            int costSp = ProcessorJobSession.AdjustCostSp(baseSp);
+            int duration = ComputeDuration(crafter, shell, costSp);
+            ProcessorJobSession.RememberCraftTiming(duration, costSp);
+
+            CompleteOne(worker, crafter, machine, shell, ings, blessed, costSp, duration);
+
+            if (!ProcessorJobSession.Active)
+            {
+                return false;
+            }
+
+            // CompleteOne must have advanced the job; otherwise treat as failed cycle.
+            if (ProcessorJobSession.Completed <= completedBefore
+                && ProcessorJobSession.Remaining >= remainingBefore)
+            {
+                Plugin.LogDebug("catch-up one made no progress");
+                return false;
+            }
+
+            // Bulk must have decreased (or last unit destroyed) for consume machines.
+            if (crafter.IsConsumeIng)
+            {
+                bool anyDecreased = false;
+                for (int i = 0; i < sources.Count; i++)
+                {
+                    Thing? s = sources[i];
+                    if (s == null || s.isDestroyed)
+                    {
+                        anyDecreased = true;
+                        break;
+                    }
+
+                    if (s.Num < numsBefore[i])
+                    {
+                        anyDecreased = true;
+                        break;
+                    }
+                }
+
+                if (!anyDecreased)
+                {
+                    Plugin.LogWarn("catch-up crafted without bulk decrease - abort further catch-up");
+                    return false;
+                }
+            }
+
+            ProcessorJobSession.SyncIngredientMarksAfterCraft();
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("processor catch-up one failed: " + ex.Message);
+            CleanupPartialIngs(ings);
+            return false;
+        }
     }
 
     static void CleanupPartialIngs(List<Thing> ings)
@@ -572,13 +848,10 @@ ProcessorJobSession.NoteCompleted(exp);
 
             try
             {
-                if (EClass.pc != null)
-                {
-                    EClass.pc.Pick(t);
-                }
+                ProcessorJobSession.ReturnOneIngredientToPc(t);
             }
             catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-}
+        }
     }
 
     static void ReturnIngs(List<Thing> ings)

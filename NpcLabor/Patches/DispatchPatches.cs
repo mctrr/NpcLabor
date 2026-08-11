@@ -3,6 +3,7 @@ using HarmonyLib;
 using UnityEngine;
 using NpcLabor.Dispatch;
 using NpcLabor.TownLabor;
+using NpcLabor.Process;
 
 namespace NpcLabor.Patches;
 
@@ -53,6 +54,7 @@ internal static class DispatchGameDateHourPatch
         {
             Plugin.LogWarn("townlabor gamedate hour: " + ex.Message);
         }
+
     }
 }
 // Final safety net: vanilla EloMapActor.OnChangeHour does light.sr.color with no null check.
@@ -71,6 +73,38 @@ internal static class DispatchEloMapActorHourPatch
 }
 }
 
+// QuestManager.Start always calls Quest.UpdateJournal -> Msg "journalUpdate2".
+// Our trackers are display-only; mission start already announced. Suppress the spam
+// so F9/load re-pin and hour recovery never yell "地区派遣更新了".
+[HarmonyPatch(typeof(Quest), nameof(Quest.UpdateJournal))]
+internal static class DispatchQuestUpdateJournalQuietPatch
+{
+    [HarmonyPrefix]
+    static bool Prefix(Quest __instance)
+    {
+        try
+        {
+            if (__instance is QuestNpcLaborDispatch || __instance is QuestNpcLaborTownLabor)
+            {
+                return false;
+            }
+
+            // Legacy Dummy rows with our id prefix (mod reinstall mid-save).
+            string id = __instance?.id ?? string.Empty;
+            if (id.StartsWith("npclabor_dispatch_", StringComparison.Ordinal)
+                || id.StartsWith("npclabor_townlabor_", StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+        catch
+        {
+        }
+
+        return true;
+    }
+}
+
 [HarmonyPatch(typeof(Game), nameof(Game.OnBeforeSave))]
 internal static class DispatchSavePatch
 {
@@ -79,12 +113,37 @@ internal static class DispatchSavePatch
     {
         try
         {
+            // Keep live typed pins in game.txt so F9 does not destroy/recreate them.
+            // Destroy+Start calls Quest.UpdateJournal ("journalUpdate2") — that is the
+            // "地区派遣更新了" spam on save. Only drop Dummy/orphan/dup rows here.
+            // Mission truth still lives in npclabor_*.json.
+            DungeonDispatchManager.SanitizeBrokenTrackerQuestsForSave();
+            TownLaborManager.SanitizeBrokenTrackerQuestsForSave();
             DungeonDispatchManager.Save();
             TownLaborManager.Save();
         }
         catch (Exception ex)
         {
             Plugin.LogWarn("dispatch save patch: " + ex.Message);
+        }
+    }
+}
+
+// After save: list-only dedupe. Do not touch WidgetQuestTracker.items here —
+// mutating/DestroyImmediate mid-widget lifetime caused SetActive NREs on Refresh.
+[HarmonyPatch(typeof(Game), nameof(Game.Save))]
+internal static class DispatchSaveRepinPatch
+{
+    [HarmonyPostfix]
+    static void Postfix()
+    {
+        try
+        {
+            DungeonDispatchManager.DedupeNpcLaborTrackerQuests();
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogDebug("dispatch save list dedupe: " + ex.Message);
         }
     }
 }
@@ -98,8 +157,14 @@ internal static class DispatchLoadPatch
         try
         {
             SpecialRewardConfig.Reload();
+            // Do NOT hard-strip + re-Start pins on load.
+            // WidgetQuestTracker matches rows by Quest object reference and only appends.
+            // Strip/Start replaces the Quest instance -> old rows stick around -> visual
+            // double pins, then ItemQuestTracker.Refresh hits null buttonGoto.SetActive NRE.
+            // Load() already heals list (drop Dummy/orphan/dup, Start only if missing).
             DungeonDispatchManager.Load();
             TownLaborManager.Load();
+            // List heal only inside Load (Start missing pins). Do not thrash WidgetQuestTracker here.
         }
         catch (Exception ex)
         {
@@ -333,6 +398,7 @@ internal static class DispatchZoneEnterPatch
             {
                 DungeonDispatchManager.OnZoneEntered(__0);
                 TownLaborManager.OnZoneEntered(__0);
+                ProcessorJobSession.OnZoneEntered(__0);
             }
         }
         catch (Exception ex)
@@ -477,72 +543,3 @@ internal static class DispatchQuestOnShowDialogPatch
         catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs silent catch: " + __e.Message); }
 }
 }
-
-// Load/remove can leave destroyed ItemQuestTracker rows in WidgetQuestTracker.items.
-// Vanilla Kill does DestroyImmediate(gameObject) without guarding already-dead rows.
-[HarmonyPatch(typeof(ItemQuestTracker), nameof(ItemQuestTracker.Kill))]
-internal static class DispatchItemQuestTrackerKillPatch
-{
-    [HarmonyPrefix]
-    static bool Prefix(ItemQuestTracker __instance)
-    {
-        try
-        {
-            if (__instance == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                // Unity fake-null for destroyed components.
-                if (__instance.Equals(null))
-                {
-                    return false;
-                }
-            }
-            catch
-            {
-                return false;
-            }
-
-            try
-            {
-                _ = __instance.gameObject;
-            }
-            catch
-            {
-                try
-                {
-                    if (WidgetQuestTracker.Instance?.items != null)
-                    {
-                        WidgetQuestTracker.Instance.items.Remove(__instance);
-                    }
-                }
-                catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs silent catch: " + __e.Message); }
-return false;
-            }
-
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-}
-
-[HarmonyPatch(typeof(WidgetQuestTracker), nameof(WidgetQuestTracker.Refresh))]
-internal static class DispatchWidgetQuestTrackerRefreshPatch
-{
-    [HarmonyPrefix]
-    static void Prefix()
-    {
-        try
-        {
-            DungeonDispatchManager.SanitizeQuestTrackerItems();
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs silent catch: " + __e.Message); }
-}
-}
-

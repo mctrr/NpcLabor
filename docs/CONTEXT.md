@@ -40,6 +40,8 @@ Player-facing names live in `NpcLabor/LaborTerms.cs` (via `LaborText` CN/EN). Ba
 - Pin non-save; party + residents; skill <= 0 hidden.
 - Skill UI: `制造 X / 有效 Y`.
 - Version **1.14.514** never change.
+- Uninstall hygiene: **recall all dispatch + town labor before disabling the mod** (do not rely on tracker strip/rebuild).
+
 - Boundary: do not fork Auto Act; do not merge into BetterCustomSprites.
 
 ## Workshop metadata (2026-08-07)
@@ -56,8 +58,9 @@ Player-facing names live in `NpcLabor/LaborTerms.cs` (via `LaborText` CN/EN). Ba
 - One conversion cycle per tick via `TraitCrafter.Craft(AI_UseCrafter)` with `recipe == null`.
 - Flow: set 加工 operator (自己/自动/某人) first → fill drag grid → intercept TryStartCraft → claim full stacks → close UI → NPC goto machine → product on ground.
 - Runtime job only (no save). Single active job.
-- NPC SP cost reduced by Floor(npcSkill*0.25), min 1; duration uses NPC skill; NPC gets craft ModExp.
-- Clear on complete / cancel / worker death / PC death / zone change; leftover ings returned to PC.
+- NPC process jobs **spend no SP** (costSp still used only for exp scale). Duration uses NPC skill then **half cut** (`max(1, floor(base*0.5))`); live progress interval `2` (vanilla craft uses 5 for anime cadence). NPC gets craft ModExp.
+- Claimed ingredients **park on the machine tile** (not PC bag) for bulk jobs; leftovers return to PC on Clear.
+- **Zone leave (simple hold):** party worker -> Clear(zone-change) + rejoin. Resident worker -> Suspend (ings stay on machine, AI dropped, **no hour-tick craft**). On return to work zone: rebind parked ings by uid/cell, estimate finished crafts from elapsed game minutes at **half away speed** (duration*2 minutes/craft), run catch-up only on live stacks (no product without consume), then resume AI if Remaining > 0. Still runtime-only (not saved; quit mid-hold loses job).
 - Party hop: companions leave party on start; **set `c_wasInPcParty` after `RemoveMember`** (vanilla clears the flag inside RemoveMember). Clear rejoins and clears the flag; if Clear never runs, vanilla `FactionBranch.OnAfterSimulate` can auto-rejoin. Still runtime-only (no process-job save).
 
 **Out of scope / rejected:**

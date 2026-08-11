@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using Newtonsoft.Json;
 
 namespace NpcLabor.Dispatch;
 
@@ -8,8 +9,13 @@ namespace NpcLabor.Dispatch;
 /// No deadline, no fame/karma, not abandonable from journal (recall via dispatch UI).
 /// Named generically — dispatch may grow beyond dungeons later.
 /// </summary>
-internal sealed class QuestNpcLaborDispatch : Quest
+/// <remarks>
+/// Must stay public: vanilla GameIO uses TypeNameHandling.Auto. Internal types fail
+/// BindToType on load and become QuestDummy, which then collides with our re-created tracker.
+/// </remarks>
+public sealed class QuestNpcLaborDispatch : Quest
 {
+    [JsonProperty]
     public int missionId;
 
     public override bool TrackOnStart => true;
@@ -65,7 +71,7 @@ internal sealed class QuestNpcLaborDispatch : Quest
                 person = new Person();
             }
             catch (System.Exception __e) { Plugin.LogDebug("QuestNpcLaborDispatch.cs silent catch: " + __e.Message); }
-}
+        }
     }
 
     public override void OnStart()
@@ -77,7 +83,7 @@ internal sealed class QuestNpcLaborDispatch : Quest
             base.OnStart();
         }
         catch (System.Exception __e) { Plugin.LogDebug("QuestNpcLaborDispatch.cs silent catch: " + __e.Message); }
-}
+    }
 
     public override string GetTitle()
     {
@@ -138,12 +144,12 @@ internal sealed class QuestNpcLaborDispatch : Quest
         DungeonDispatchMission? m = Mission();
         if (m == null)
         {
-            return GetTitle() + "\n" + NpcLabor.LaborText.T("dis.q.ended");
+            // Title is drawn by ItemQuestTracker.textTitle; body must not re-emit it
+            // or the pin looks like two stacked trackers.
+            return NpcLabor.LaborText.T("dis.q.ended");
         }
 
         var sb = new StringBuilder();
-        sb.Append(GetTitle());
-        sb.Append('\n');
         sb.Append(NpcLabor.LaborText.T("dis.q.members", m.MemberNames()));
         sb.Append('\n');
         sb.Append(NpcLabor.LaborText.T("dis.q.position", FloorLabel(m)));

@@ -34,7 +34,7 @@ try
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
 try
         {
-            if (ProcessorJobSession.Active && ProcessorJobSession.NpcUid == uidChara)
+            if (ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uidChara)
             {
                 return true;
             }
@@ -94,7 +94,7 @@ try
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
 try
         {
-            if (ProcessorJobSession.Active && ProcessorJobSession.NpcUid == uid)
+            if (ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uid)
             {
                 return NpcLabor.LaborText.T("town.busy.process", NpcLabor.LaborTerms.Process);
             }

@@ -1,0 +1,12 @@
+Use case: ads-marketing
+Asset type: Steam Workshop cover thumbnail
+Primary request: Steam Workshop cover for Elin mod "NPC 帮工 (NPC Labor)" showing a cozy fantasy village workshop where a player adventurer and friendly NPCs co-craft, process materials, and prepare for dispatch
+Scene/backdrop: warm wooden workshop interior opening to a sunny medieval fantasy town square and distant forest hills, Elin-like pixel-art-adjacent painterly fantasy game aesthetic
+Subject: center composition with adventurer at a workbench assisted by an NPC craftsman; side vignettes suggest a furnace/processor, a town notice board with a 派遣 job, and a small party packing for region/dungeon dispatch with harvest goods (logs, fish, ore)
+Style/medium: polished game marketing illustration, readable at thumbnail size, soft painterly lighting, charming RPG workshop mood without photorealism
+Composition/framing: square 1:1 Steam Workshop cover, strong central silhouette, title-safe top third for text, clean margins
+Lighting/mood: warm golden interior light mixed with soft outdoor daylight, inviting and industrious
+Color palette: warm wood, soft amber, muted greens, cream parchment accents; avoid monochrome purple/blue wash
+Text (verbatim): "NPC 帮工"
+Constraints: exact Chinese title text large and legible at thumbnail size; English subtitle "NPC Labor" smaller below; no Steam logo, no watermark, no real-world brand marks, no UI chrome, no chaotic clutter
+Avoid: photoreal faces, horror, dark grimdark palette, illegible tiny text, extra slogans, chaos mushrooms, modern tech
