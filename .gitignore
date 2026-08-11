@@ -9,6 +9,10 @@
 # Deploy / game output
 Package/
 
+# Local product docs / art (do not publish)
+docs/
+AGENTS.md
+
 # Local-only agent / research (do not publish)
 .agents/
 .research/

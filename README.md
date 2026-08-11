@@ -5,6 +5,7 @@ Elin BepInEx/Harmony mod: co-craft, processor outsource, region/dungeon dispatch
 - Workshop package id: `mctrr.npclabor` (keep stable)
 - Internal assembly/folder: `NpcLabor`
 - Version string: **1.14.514** (do not change)
+- License: **MIT** (see [LICENSE](LICENSE))
 
 ## Build
 
@@ -20,6 +21,8 @@ Deployed DLL lands under the game `Package\Mod_NpcLabor\` folder. Full game rest
 | Path | Role |
 |------|------|
 | `NpcLabor/` | Mod source (Harmony patches + systems) |
-| `docs/` | Product / domain notes (`CONTEXT.md`) |
+| `NpcLabor/package/` | Runtime package assets (`package.xml`, configs) |
+| `LICENSE` | MIT license |
 
-`.agents/` and `.research/` are local-only and are not published.
+This repository publishes **source + package assets only**.
+Local agent notes (`.agents/`), decompile caches (`.research/`), and product docs (`docs/`) stay untracked.
