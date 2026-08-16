@@ -11,8 +11,8 @@ namespace NpcLabor.CoCraft;
 /// </summary>
 internal class CoCraftApproachAi : AIAct
 {
-    /// <summary>Ticks without closing distance before snapping beside the PC.</summary>
-    const int StuckTicks = 90;
+    /// <summary>Frames without closing distance (~4s at 60fps) before snapping beside the PC.</summary>
+    const int StuckFrames = 240;
 
     public override bool CancelWhenDamaged => false;
 
@@ -34,7 +34,7 @@ internal class CoCraftApproachAi : AIAct
     public override IEnumerable<Status> Run()
     {
         int lastDist = 99;
-        int stuck = 0;
+        int lastProgressFrame = Time.frameCount;
         while (CoCraftSession.Active && !CoCraftSession.ApproachExpired())
         {
             Chara? pc = EClass.pc;
@@ -52,14 +52,20 @@ internal class CoCraftApproachAi : AIAct
             if (dist < lastDist)
             {
                 lastDist = dist;
-                stuck = 0;
+                lastProgressFrame = Time.frameCount;
             }
-            else if (++stuck >= StuckTicks)
+            else if (Time.frameCount - lastProgressFrame > StuckFrames)
             {
                 break; // path blocked — snap fallback below
             }
 
-            yield return DoGoto(pc, 1);
+            Status s = DoGoto(pc, 1);
+            if (s != Status.Running)
+            {
+                break; // unreachable — snap fallback below
+            }
+
+            yield return s;
         }
 
         if (CoCraftSession.Active && owner != null && !owner.isDead)

@@ -38,6 +38,31 @@ internal static class AiUseCrafterPatches
         CoCraftSession.Clear("ai-cancel");
     }
 
+    /// <summary>
+    /// While the craft is held waiting for the assistant (AI tick hold), allow the
+    /// player to right-click cancel. Vanilla LayerCraft.CanCancelAI is false, so
+    /// without this the PC is stuck waiting with no way out.
+    /// </summary>
+    [HarmonyPrefix]
+    [HarmonyPatch(nameof(AI_UseCrafter.CanManualCancel))]
+    static bool CanManualCancelPrefix(ref bool __result)
+    {
+        try
+        {
+            if (CoCraftSession.Active && !CoCraftSession.IsAssistantReady())
+            {
+                __result = true;
+                return false;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("co-craft manual cancel: " + ex.Message);
+        }
+
+        return true;
+    }
+
     internal static void OpenFromAi(AI_UseCrafter ai)
     {
         if (ai == null || EClass.pc == null)
