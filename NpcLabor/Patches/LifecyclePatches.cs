@@ -87,6 +87,19 @@ internal static class AiUseCrafterPatches
             return;
         }
 
+        // Approach flow (OnClickCraft intercept) already opened the session for this
+        // assistant while the NPC walks over — do not reopen (Clear would release
+        // the approach AI and re-send the NPC).
+        if (CoCraftSession.Active && CoCraftSession.NpcUid == assistant.uid)
+        {
+            if (ai.num > 0)
+            {
+                CoCraftSession.BatchNum = ai.num;
+            }
+
+            return;
+        }
+
         CoCraftSession.Open(assistant, recipe, crafter);
         if (ai.num > 0)
         {
@@ -140,43 +153,6 @@ internal static class PcDeathClearPatch
         }
         catch (System.Exception __e) { Plugin.LogDebug("LifecyclePatches.cs silent catch: " + __e.Message); }
 }
-}
-
-/// <summary>
-/// Co-craft: hold the PC's craft progress until the walking assistant arrives
-/// beside the PC. The vanilla Progress_Custom.CanProgress gate returning false
-/// simply stalls the bar; the approach AI also has a timeout fallback so the
-/// craft can never wait forever.
-/// </summary>
-[HarmonyPatch(typeof(Progress_Custom))]
-internal static class CoCraftProgressWaitPatch
-{
-    [HarmonyPrefix]
-    [HarmonyPatch(nameof(Progress_Custom.CanProgress))]
-    static bool Prefix(Progress_Custom __instance, ref bool __result)
-    {
-        try
-        {
-            if (!CoCraftSession.Active || EClass.pc == null
-                || EClass.pc.ai is not AI_UseCrafter
-                || __instance == null || __instance.owner != EClass.pc)
-            {
-                return true;
-            }
-
-            if (!CoCraftSession.IsAssistantReady() && !CoCraftSession.ApproachExpired())
-            {
-                __result = false;
-                return false;
-            }
-        }
-        catch (System.Exception ex)
-        {
-            Plugin.LogDebug("co-craft progress wait: " + ex.Message);
-        }
-
-        return true;
-    }
 }
 
 [HarmonyPatch(typeof(Player), nameof(Player.MoveZone), typeof(Zone))]

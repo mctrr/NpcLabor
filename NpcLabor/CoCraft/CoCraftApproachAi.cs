@@ -67,11 +67,11 @@ internal class CoCraftApproachAi : AIAct
             if (!(owner.ExistsOnMap && EClass.pc != null && owner.Dist(EClass.pc) <= 1))
             {
                 // Blocked / too slow: snap beside the PC as a last resort.
-                if (!CoCraftSession.SnapAssistantToPc(owner))
-                {
-                    yield break; // give up; the craft continues without the assistant
-                }
+                CoCraftSession.SnapAssistantToPc(owner);
             }
+
+            // Arrived (or gave up on reaching): start the intercepted craft.
+            CoCraftSession.OnAssistantReady();
 
             // Stand in place until the craft ends.
             try { owner.noMove = true; } catch { }

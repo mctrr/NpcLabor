@@ -73,6 +73,83 @@ internal static class LayerCraftPatches
         }
     }
 
+    /// <summary>
+    /// Co-craft: when the assistant needs to walk over, intercept OnClickCraft so the
+    /// PC waits in place instead of starting (and immediately failing) the craft.
+    /// The session is opened, the craft context stashed, and CoCraftApproachAi starts
+    /// the real AI_UseCrafter once the assistant is beside the PC (or after the snap
+    /// fallback). Runs vanilla when there is no assistant or they are already in place.
+    /// </summary>
+    [HarmonyPrefix]
+    [HarmonyPatch(nameof(LayerCraft.OnClickCraft))]
+    static bool OnClickCraftPrefix(LayerCraft __instance)
+    {
+        try
+        {
+            if (__instance == null || EClass.pc == null || __instance.recipe == null)
+            {
+                return true;
+            }
+
+            int skillId = GetRecipeSkillId(__instance);
+            Chara? assistant = AssistantResolver.ResolveForCraft(skillId);
+            if (assistant == null)
+            {
+                return true; // assist off / no candidate — vanilla flow
+            }
+
+            // Assistant already beside the PC: vanilla flow starts immediately.
+            if (assistant.ExistsOnMap && EClass.pc.ExistsOnMap && assistant.Dist(EClass.pc) <= 1)
+            {
+                return true;
+            }
+
+            // Resolve the crafter exactly like vanilla OnClickCraft does.
+            TraitCrafter? traitCrafter = __instance.factory?.trait as TraitCrafter;
+            if (traitCrafter == null)
+            {
+                traitCrafter = Trait.SelfFactory;
+                traitCrafter.owner = EClass.pc;
+            }
+
+            int num = 0;
+            try
+            {
+                if (__instance.inputNum != null)
+                {
+                    num = __instance.inputNum.Num;
+                }
+            }
+            catch
+            {
+                num = 0;
+            }
+
+            if (num <= 0)
+            {
+                return true;
+            }
+
+            // Open the session now (kicks the assistant off walking) and stash the
+            // craft context; CoCraftApproachAi starts the real AI_UseCrafter once
+            // the assistant is in place. If the session cannot open, fall back to
+            // vanilla so the craft still happens.
+            if (!CoCraftSession.Open(assistant, __instance.recipe, traitCrafter))
+            {
+                return true;
+            }
+
+            CoCraftSession.BeginWaitForAssistant(__instance, __instance.recipe, num, traitCrafter);
+            try { __instance.gameObject.SetActive(false); } catch { }
+            return false;
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogWarn("co-craft OnClickCraft intercept failed: " + ex.Message);
+            return true; // fall back to vanilla
+        }
+    }
+
     static void EnsureButton(LayerCraft layer)
     {
         if (layer == null)
