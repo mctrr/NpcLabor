@@ -34,13 +34,6 @@ internal static class CoCraftSession
     /// <summary>Max frames the craft waits for the assistant to walk over (~15s at 60fps).</summary>
     internal const int ApproachTimeoutFrames = 900;
 
-    /// <summary>OnClickCraft was intercepted; the real AI_UseCrafter starts once the assistant arrives.</summary>
-    internal static bool HasPendingCraft;
-    static LayerCraft? _pendingLayer;
-    static Recipe? _pendingRecipe;
-    static int _pendingNum;
-    static TraitCrafter? _pendingCrafter;
-
     internal static Chara? GetAssistant()
     {
         if (!Active || NpcUid == 0)
@@ -234,76 +227,6 @@ internal static class CoCraftSession
         }
     }
 
-    /// <summary>
-    /// Stash the intercepted craft context (LayerCraft.OnClickCraft) while the
-    /// assistant walks over. CoCraftApproachAi calls OnAssistantReady to start
-    /// the real AI_UseCrafter once they are in place (or after the snap fallback).
-    /// </summary>
-    internal static void BeginWaitForAssistant(LayerCraft layer, Recipe recipe, int num, TraitCrafter crafter)
-    {
-        HasPendingCraft = true;
-        _pendingLayer = layer;
-        _pendingRecipe = recipe;
-        _pendingNum = num;
-        _pendingCrafter = crafter;
-    }
-
-    /// <summary>
-    /// The assistant is in place (or we gave up on reaching them): start the craft
-    /// that was intercepted by OnClickCraft, mirroring vanilla's AI_UseCrafter setup.
-    /// </summary>
-    internal static void OnAssistantReady()
-    {
-        if (!HasPendingCraft)
-        {
-            return;
-        }
-
-        HasPendingCraft = false;
-        LayerCraft? layer = _pendingLayer;
-        Recipe? recipe = _pendingRecipe;
-        int num = _pendingNum;
-        TraitCrafter? crafter = _pendingCrafter;
-        _pendingLayer = null;
-        _pendingRecipe = null;
-        _pendingNum = 0;
-        _pendingCrafter = null;
-
-        if (!Active || EClass.pc == null || crafter == null || recipe == null)
-        {
-            Clear("no-assistant");
-            return;
-        }
-
-        if (num > 0)
-        {
-            BatchNum = num;
-        }
-
-        try
-        {
-            if (crafter is TraitFactory tf)
-            {
-                tf.recipe = recipe;
-            }
-
-            recipe.SaveLastIngredients();
-            EClass.pc.SetAI(new AI_UseCrafter
-            {
-                crafter = crafter,
-                layer = layer,
-                recipe = recipe,
-                num = num
-            });
-            try { ActionMode.Adv.SetTurbo(); } catch { }
-        }
-        catch (System.Exception ex)
-        {
-            Plugin.LogWarn("co-craft start pending craft failed: " + ex.Message);
-            Clear("ai-set-fail");
-        }
-    }
-
     /// <summary>Free the assistant's movement and restore their default idle AI.</summary>
     static void ReleaseAssistant()
     {
@@ -377,12 +300,6 @@ internal static class CoCraftSession
         }
 
         ReleaseAssistant();
-
-        HasPendingCraft = false;
-        _pendingLayer = null;
-        _pendingRecipe = null;
-        _pendingNum = 0;
-        _pendingCrafter = null;
 
         LastClearReason = reason ?? "";
         if (announce && Active)

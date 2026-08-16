@@ -70,9 +70,6 @@ internal class CoCraftApproachAi : AIAct
                 CoCraftSession.SnapAssistantToPc(owner);
             }
 
-            // Arrived (or gave up on reaching): start the intercepted craft.
-            CoCraftSession.OnAssistantReady();
-
             // Stand in place until the craft ends.
             try { owner.noMove = true; } catch { }
             while (CoCraftSession.Active)

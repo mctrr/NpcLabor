@@ -87,19 +87,6 @@ internal static class AiUseCrafterPatches
             return;
         }
 
-        // Approach flow (OnClickCraft intercept) already opened the session for this
-        // assistant while the NPC walks over — do not reopen (Clear would release
-        // the approach AI and re-send the NPC).
-        if (CoCraftSession.Active && CoCraftSession.NpcUid == assistant.uid)
-        {
-            if (ai.num > 0)
-            {
-                CoCraftSession.BatchNum = ai.num;
-            }
-
-            return;
-        }
-
         CoCraftSession.Open(assistant, recipe, crafter);
         if (ai.num > 0)
         {
@@ -333,6 +320,45 @@ internal static class TownLaborLeaveConfirmPatch
             Plugin.LogDebug("townlabor leave confirm: " + ex.Message);
             return true;
         }
+    }
+}
+
+/// <summary>
+/// Co-craft: hold the PC's AI_UseCrafter tick while the assistant walks over, so the
+/// craft does not start (and cannot be cancelled by a canProgress gate) until the
+/// assistant is beside the PC. AIAct.Tick drives AI_UseCrafter.Run; skipping it for
+/// a few ticks just stalls the craft. The approach timeout guarantees the craft can
+/// never wait forever.
+/// </summary>
+[HarmonyPatch(typeof(AIAct))]
+internal static class CoCraftAiTickHoldPatch
+{
+    [HarmonyPrefix]
+    [HarmonyPatch(nameof(AIAct.Tick))]
+    static bool Prefix(AIAct __instance)
+    {
+        try
+        {
+            if (!CoCraftSession.Active || EClass.pc == null
+                || __instance is not AI_UseCrafter
+                || __instance.owner != EClass.pc)
+            {
+                return true;
+            }
+
+            // Hold the craft until the assistant arrives; the timeout keeps the
+            // wait bounded even if the NPC cannot reach the PC.
+            if (!CoCraftSession.IsAssistantReady() && !CoCraftSession.ApproachExpired())
+            {
+                return false;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("co-craft AI tick hold: " + ex.Message);
+        }
+
+        return true;
     }
 }
 
