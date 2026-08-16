@@ -29,6 +29,10 @@ internal static class CoCraftSession
 
     static int _npcSkillDuration;
     static int _npcSkillReq;
+    /// <summary>Time.frameCount when the assistant was told to approach; drives the walk timeout.</summary>
+    static int _approachStartFrame;
+    /// <summary>Max frames the craft waits for the assistant to walk over (~15s at 60fps).</summary>
+    internal const int ApproachTimeoutFrames = 900;
 
     internal static Chara? GetAssistant()
     {
@@ -126,11 +130,10 @@ internal static class CoCraftSession
             durationSkillId = reqSkillId;
         }
 
-        TeleportToPc(assistant);
-        // Pin the assistant beside the PC before crafting starts so they never
-        // wander off mid-progress (teleport alone cancels their old AI and the
-        // branch can re-assign a goal that walks away).
-        HoldAssistant(assistant);
+        // The assistant walks over instead of teleporting; ApproachAi pins them
+        // in place once they arrive and the craft waits until they are ready.
+        ApproachAssistant(assistant);
+        _approachStartFrame = Time.frameCount;
 
         NpcUid = assistant.uid;
         ReqSkillId = reqSkillId;
@@ -153,11 +156,49 @@ internal static class CoCraftSession
         return true;
     }
 
-    internal static void TeleportToPc(Chara assistant)
+    /// <summary>Tell the assistant to walk over to the PC and then stand in place.</summary>
+    static void ApproachAssistant(Chara c)
     {
-        if (EClass.pc?.pos == null)
+        if (c == null)
         {
             return;
+        }
+
+        try
+        {
+            c.SetAI(new CoCraftApproachAi());
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("co-craft approach assistant: " + ex.Message);
+        }
+    }
+
+    /// <summary>True when the assistant is standing beside the PC (craft may progress).</summary>
+    internal static bool IsAssistantReady()
+    {
+        Chara? c = GetAssistant();
+        if (c == null || EClass.pc == null || !c.ExistsOnMap || !EClass.pc.ExistsOnMap)
+        {
+            return false;
+        }
+
+        return c.Dist(EClass.pc) <= 1;
+    }
+
+    /// <summary>True when the assistant has been walking too long and the craft should stop waiting.</summary>
+    internal static bool ApproachExpired()
+        => Time.frameCount - _approachStartFrame > ApproachTimeoutFrames;
+
+    /// <summary>
+    /// Last-resort fallback when the assistant cannot walk over (blocked path / timeout):
+    /// move them beside the PC without cancelling the running approach AI.
+    /// </summary>
+    internal static bool SnapAssistantToPc(Chara assistant)
+    {
+        if (assistant == null || assistant.isDead || EClass.pc?.pos == null)
+        {
+            return false;
         }
 
         Point dest = EClass.pc.pos;
@@ -176,37 +217,13 @@ internal static class CoCraftSession
 
         try
         {
-            assistant.Teleport(dest, silent: true, force: true);
-        }
-        catch
-        {
-            try
-            {
-                assistant.MoveImmediate(dest, focus: false, cancelAI: true);
-            }
-            catch (System.Exception ex)
-            {
-                Plugin.LogWarn($"assistant teleport failed: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>Pin the assistant in place beside the PC for the whole craft.</summary>
-    static void HoldAssistant(Chara c)
-    {
-        if (c == null)
-        {
-            return;
-        }
-
-        try { c.noMove = true; } catch { }
-        try
-        {
-            c.SetAI(new CoCraftStandAi());
+            assistant.MoveImmediate(dest, focus: false, cancelAI: false);
+            return true;
         }
         catch (System.Exception ex)
         {
-            Plugin.LogDebug("co-craft hold assistant: " + ex.Message);
+            Plugin.LogDebug("co-craft snap assistant: " + ex.Message);
+            return false;
         }
     }
 
@@ -229,7 +246,7 @@ internal static class CoCraftSession
             try { c.noMove = false; } catch { }
             try
             {
-                if (c.ai is CoCraftStandAi)
+                if (c.ai is CoCraftApproachAi)
                 {
                     c.SetNoGoal();
                 }
