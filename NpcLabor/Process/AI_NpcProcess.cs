@@ -407,18 +407,22 @@ yield return Do(progress);
         int snapCount = 0;
         int lastDist = owner.Dist(machine);
         SetChild(new AI_Goto(machine, 1), KeepRunning);
-        while (child != null && child.status == Status.Running)
+
+        // One movement step: advance the goto child, then check arrival / stuck.
+        // Returns true when the walk should stop (arrived, dead, machine gone,
+        // or stuck-gave-up).
+        bool StepOnce()
         {
             TickChild();
             if (owner == null || owner.isDead || machine.isDestroyed)
             {
-                yield break;
+                return true;
             }
 
             int dist = owner.Dist(machine);
             if (dist <= 1)
             {
-                yield break;
+                return true;
             }
 
             if (dist < lastDist)
@@ -435,7 +439,7 @@ yield return Do(progress);
                     {
                         // No free tile near the machine or the path is permanently blocked.
                         walkFailReason = "stuck";
-                        yield break;
+                        return true;
                     }
 
                     if (TrySnapNearMachine(machine))
@@ -444,11 +448,31 @@ yield return Do(progress);
                         stuckTicks = 0;
                         // Stale child path — re-path from the new spot.
                         SetChild(new AI_Goto(machine, 1), KeepRunning);
-                        continue;
                     }
+                    else
+                    {
+                        // No free tile found; wait and retry the snap later.
+                        stuckTicks = 0;
+                    }
+                }
+            }
 
-                    // No free tile found; wait and retry the snap later.
-                    stuckTicks = 0;
+            return false;
+        }
+
+        while (child != null && child.status == Status.Running)
+        {
+            // Two steps per tick — the worker walks to the machine twice as fast.
+            if (StepOnce())
+            {
+                yield break;
+            }
+
+            if (child != null && child.status == Status.Running)
+            {
+                if (StepOnce())
+                {
+                    yield break;
                 }
             }
 

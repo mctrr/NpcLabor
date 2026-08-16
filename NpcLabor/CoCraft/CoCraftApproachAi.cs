@@ -35,6 +35,7 @@ internal class CoCraftApproachAi : AIAct
     {
         int lastDist = 99;
         int lastProgressFrame = Time.frameCount;
+        bool haveChild = false;
         while (CoCraftSession.Active && !CoCraftSession.ApproachExpired())
         {
             Chara? pc = EClass.pc;
@@ -60,14 +61,21 @@ internal class CoCraftApproachAi : AIAct
             }
 
             // Walk into the PC's own cell (shared tile) so the PC's surrounding
-            // furniture/characters can never block the assistant.
-            Status s = DoGoto(pc, 0);
-            if (s != Status.Running)
+            // furniture/characters can never block the assistant. Two steps per
+            // tick — the assistant walks over twice as fast.
+            if (!haveChild || child == null || child.status != Status.Running)
             {
-                break; // unreachable — snap fallback below
+                SetChild(new AI_Goto(pc, 0), KeepRunning);
+                haveChild = true;
             }
 
-            yield return s;
+            TickChild();
+            if (child != null && child.status == Status.Running)
+            {
+                TickChild();
+            }
+
+            yield return Status.Running;
         }
 
         if (CoCraftSession.Active && owner != null && !owner.isDead)
