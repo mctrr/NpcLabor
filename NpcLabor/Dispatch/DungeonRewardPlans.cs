@@ -447,20 +447,19 @@ return false;
 
 
     /// <summary>
-    /// Dungeon drop pool quality level. Player request: double dangerLv into ThingGen lv.
+    /// Dungeon drop pool quality level. Vanilla DangerLv (no doubling).
     /// </summary>
     internal static int RewardLv(DungeonDispatchMission? mission)
     {
         int danger = mission == null ? 1 : Math.Max(1, mission.dangerLv);
-        return Math.Max(1, danger * 2);
+        return Math.Max(1, danger);
     }
 
-
-    /// <summary>Boss / success extras use RewardLv * bossRewardMult (config; fixed dungeons leave base extras alone elsewhere).</summary>
+    /// <summary>Boss / success extras use a small bump over dangerLv (not doubled).</summary>
     internal static int BossRewardLv(DungeonDispatchMission? mission)
     {
-        int baseLv = RewardLv(mission);
-        return Math.Max(1, Mathf.RoundToInt(baseLv * LaborConfig.BossRewardMult));
+        int danger = mission == null ? 1 : Math.Max(1, mission.dangerLv);
+        return Math.Max(1, Mathf.RoundToInt(danger * 1.2f));
     }
 
 

@@ -68,6 +68,8 @@ internal static partial class DungeonDispatchRewards
                     CollectExploreThings(mission, exploreScale, all);
                     CollectDungeonGatherThings(mission, exploreScale, all);
                     CollectLockpickChestThings(mission, exploreScale, all);
+                    // Small danger-scaled mineral packet (not sulfur/gold/scrap flood).
+                    AddDungeonOrePacket(mission, all, exploreScale);
                 }
 
                 // Boss / fixed-dungeon extras only on success.
@@ -343,7 +345,10 @@ internal static partial class DungeonDispatchRewards
             // Weak parties still leave a few piles; strong explore fills the floor.
             target = Mathf.Max(target, 8 + members * 3 + explore / 10);
             int want = Mathf.Max(1, Mathf.RoundToInt(target * s));
-            want = Mathf.Clamp(want, 1, 2000);
+            // Player wants a light haul, not a backpack: ~1/8 of a large bag.
+            // danger adds a little headroom but stays a handful of piles.
+            int haulCap = Mathf.Clamp(4 + danger / 30, 4, 8);
+            want = Mathf.Clamp(want, 1, haulCap);
 
             int safety = 0;
             int maxRolls = Mathf.Clamp(want * 2 + 16, 16, 240);
@@ -364,11 +369,36 @@ internal static partial class DungeonDispatchRewards
                     continue;
                 }
 
+                // Gear/books: never stack, always 1-item, and reject if LV/price far above dangerLv.
+                bool isGearOrBook = false;
+                try
+                {
+                    isGearOrBook = pile.IsEquipment
+                        || (pile.category != null && (pile.category.id ?? "") == "spellbook")
+                        || (pile.id ?? "").StartsWith("book_");
+                }
+                catch { }
+
+                if (isGearOrBook)
+                {
+                    int cardLv = 0;
+                    try { cardLv = pile.LV; } catch { }
+                    int priceGate = 0;
+                    try { priceGate = pile.GetPrice(CurrencyType.Money, sell: false); } catch { }
+                    // dangerLv * 1.5 soft cap on card LV; danger*200+500 oren soft cap on price.
+                    if (cardLv > danger * 3 / 2 || priceGate > danger * 200 + 500)
+                    {
+                        if (pile.parent == null) pile.Destroy();
+                        continue;
+                    }
+                }
+
                 int n = 1;
                 try { n = Math.Max(1, pile.Num); } catch { n = 1; }
 
                 // Keep piles looking like ground scatter: mostly small stacks.
                 int maxStack = left <= 3 ? left : Mathf.Clamp(2 + explore / 40 + danger / 25, 2, 8);
+                if (isGearOrBook) maxStack = 1;
                 if (n <= 1)
                 {
                     try { n = 1 + (EClass.rnd(Math.Max(1, maxStack))); } catch { n = Math.Min(3, maxStack); }
@@ -395,6 +425,49 @@ internal static partial class DungeonDispatchRewards
         catch (Exception ex)
         {
             Plugin.LogDebug("collect explore failed: " + ex.Message);
+        }
+    }
+
+
+    /// <summary>
+    /// Small danger-scaled mineral packet (10-30 total, material tier rises with dangerLv).
+    /// Never produces sulfur, gold ore, or scrap. Region dispatch is excluded.
+    /// </summary>
+    static void AddDungeonOrePacket(DungeonDispatchMission mission, List<Thing> things, float scale)
+    {
+        try
+        {
+            if (mission == null || things == null || mission.isRegion)
+            {
+                return;
+            }
+
+            float s = Mathf.Clamp(scale, 0f, 1f);
+            if (s <= 0.0001f)
+            {
+                return;
+            }
+
+            int danger = Math.Max(1, mission.dangerLv);
+            int total = Mathf.Clamp(1 + EClass.rnd(15), 1, 15);
+            total = Mathf.RoundToInt(total * s);
+            if (total <= 0)
+            {
+                return;
+            }
+
+            Thing? ore = CreateWeightedOreDangerScaled(danger);
+            if (ore == null)
+            {
+                return;
+            }
+            ore.SetNum(total);
+            things.Add(ore);
+            NoteLoot(mission, ore, "Ore");
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogDebug("add dungeon ore packet failed: " + ex.Message);
         }
     }
 
@@ -427,7 +500,9 @@ internal static partial class DungeonDispatchRewards
             }
 
             int want = Mathf.Max(0, Mathf.RoundToInt(target * s));
-            want = Mathf.Clamp(want, 0, 800);
+            // Gather is a separate budget; cap to a few piles (not a second backpack).
+            int gatherCap = Mathf.Clamp(2 + danger / 40, 2, 4);
+            want = Mathf.Clamp(want, 0, gatherCap);
             if (want <= 0)
             {
                 return;
@@ -452,9 +527,33 @@ internal static partial class DungeonDispatchRewards
                     continue;
                 }
 
+                // Gear/books: never stack, always 1-item, reject if LV/price far above dangerLv.
+                bool isGearOrBook = false;
+                try
+                {
+                    isGearOrBook = pile.IsEquipment
+                        || (pile.category != null && (pile.category.id ?? "") == "spellbook")
+                        || (pile.id ?? "").StartsWith("book_");
+                }
+                catch { }
+
+                if (isGearOrBook)
+                {
+                    int cardLv = 0;
+                    try { cardLv = pile.LV; } catch { }
+                    int priceGate = 0;
+                    try { priceGate = pile.GetPrice(CurrencyType.Money, sell: false); } catch { }
+                    if (cardLv > danger * 3 / 2 || priceGate > danger * 200 + 500)
+                    {
+                        if (pile.parent == null) pile.Destroy();
+                        continue;
+                    }
+                }
+
                 int n = 1;
                 try { n = Math.Max(1, pile.Num); } catch { n = 1; }
                 int maxStack = left <= 3 ? left : Mathf.Clamp(2 + gather / 35 + danger / 30, 2, 6);
+                if (isGearOrBook) maxStack = 1;
                 if (n <= 1)
                 {
                     try { n = 1 + (EClass.rnd(Math.Max(1, maxStack))); } catch { n = Math.Min(2, maxStack); }

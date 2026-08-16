@@ -1905,6 +1905,68 @@ return t;
     }
 
 
+    /// <summary>
+    /// Danger-scaled ore for dungeon dispatch mineral packets.
+    /// Material tier rises with danger: low=copper/iron, mid=bronze/steel, high=silver+.
+    /// Never produces sulfur, gold ore, or scrap (banned via IsBannedDungeonStapleThing / IsForbiddenHighOreMaterial).
+    /// </summary>
+    static Thing? CreateWeightedOreDangerScaled(int danger)
+    {
+        string alias;
+        if (danger < 30)
+        {
+            // Low danger: copper/iron heavy, small bronze.
+            int r = EClass.rnd(100);
+            if (r < 55) alias = "copper";
+            else if (r < 90) alias = "iron";
+            else alias = "bronze";
+        }
+        else if (danger < 80)
+        {
+            // Mid danger: iron/bronze/steel.
+            int r = EClass.rnd(100);
+            if (r < 35) alias = "iron";
+            else if (r < 65) alias = "bronze";
+            else if (r < 90) alias = "steel";
+            else alias = "copper";
+        }
+        else if (danger < 150)
+        {
+            // High danger: bronze/steel/silver.
+            int r = EClass.rnd(100);
+            if (r < 30) alias = "bronze";
+            else if (r < 60) alias = "steel";
+            else if (r < 85) alias = "silver";
+            else alias = "iron";
+        }
+        else
+        {
+            // Very high danger: steel/silver/platinum, rare adamantite.
+            int r = EClass.rnd(100);
+            if (r < 30) alias = "steel";
+            else if (r < 60) alias = "silver";
+            else if (r < 85) alias = "platinum";
+            else if (r < 97) alias = "bronze";
+            else alias = "adamantite";
+        }
+
+        Thing? ore = CreateMetalHard(alias)
+            ?? CreateMaterialThing(alias)
+            ?? CreateMetalHard("copper")
+            ?? CreateMaterialThing("copper")
+            ?? CreateMetalHard("iron")
+            ?? CreateMaterialThing("iron");
+        if (ore != null && (IsGoldLikeThing(ore) || IsForbiddenHighOreMaterial(LiveMaterialAlias(ore)) || IsBannedDungeonStapleThing(ore)))
+        {
+            if (ore.parent == null) ore.Destroy();
+            ore = CreateMetalHard("copper") ?? CreateMaterialThing("copper")
+                ?? CreateMetalHard("iron") ?? CreateMaterialThing("iron");
+        }
+
+        return ore;
+    }
+
+
     static Thing? CreateMountainGem()
     {
         // Prefer ore_gem card (vanilla rolls gem category mat) but pin a modest gem alias.
