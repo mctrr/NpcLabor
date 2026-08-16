@@ -681,7 +681,7 @@ Plugin.LogDebug(
             LayerList menu = EClass.ui.AddLayer<LayerList>();
             menu.SetList2(
                     options,
-                    id => MenuLabel(id),
+                    id => MenuLabel(id, skillId),
                     (id, item) =>
                     {
                         ApplyMenuChoice(id, layer);
@@ -700,7 +700,7 @@ SE.Click();
                         PersonPickerUi.StyleRow(
                             item,
                             id,
-                            MenuLabel(id),
+                            MenuLabel(id, skillId),
                             MenuSkillSub(id, skillId, skillName),
                             menuAuto: MenuAuto,
                             menuOff: MenuOff);
@@ -730,7 +730,7 @@ SE.Click();
         }
     }
 
-    static string MenuLabel(int id)
+    static string MenuLabel(int id, int skillId)
     {
         if (id == MenuAuto)
         {
@@ -748,17 +748,32 @@ SE.Click();
             return c == null ? ("#" + id) : NpcLabor.LaborText.T("co.mode.you");
         }
 
+        // A matching hobby/work prefix marks the "right" person at a glance:
+        // 爱好·队 艾琳 when a hobby matches, 工作·队 艾琳 when only an assigned
+        // work matches (the concrete hobby name is not shown).
+        HobbyWorkKind kind = HobbyTag.GetRelevantKind(c, skillId);
+
         // Portrait carries identity; keep name readable but compact for subtext room.
+        // The prefix eats into the same row width, so trim the name harder.
         string name = AssistantResolver.NameOf(c);
-        if (name.Length > 8)
+        int maxName = kind == HobbyWorkKind.None ? 8 : 5;
+        if (name.Length > maxName)
         {
-            name = name.Substring(0, 8);
+            name = name.Substring(0, maxName);
         }
 
         string tag = AssistantResolver.IsPartyMember(c)
             ? NpcLabor.LaborText.T("co.tag.party")
             : NpcLabor.LaborText.T("co.tag.home");
-        return tag + " " + name;
+        if (kind == HobbyWorkKind.None)
+        {
+            return tag + " " + name;
+        }
+
+        string prefix = kind == HobbyWorkKind.Hobby
+            ? NpcLabor.LaborText.T("co.prefix.hobby")
+            : NpcLabor.LaborText.T("co.prefix.work");
+        return prefix + "·" + tag + " " + name;
     }
 
     static string MenuSkillSub(int id, int skillId, string skillName)

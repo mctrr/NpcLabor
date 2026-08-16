@@ -107,6 +107,15 @@ internal static class PersonPickerUi
             item.Build();
         }
         catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
+// Long picker labels (e.g. 爱好·队 + name) scroll right instead of wrapping to a second line.
+        try
+        {
+            if (item.button1?.mainText != null)
+            {
+                item.button1.mainText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            }
+        }
+        catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
 // Build / SetChara may re-expand the sprite; keep the small slot.
         if (portrait != null)
         {

@@ -65,6 +65,8 @@ internal static partial class LaborText
         ["co.mode.you"] = "(あなた)",
         ["co.tag.party"] = "隊",
         ["co.tag.home"] = "住",
+        ["co.prefix.hobby"] = "趣味",
+        ["co.prefix.work"] = "仕事",
         ["co.menu.noAssist"] = "手伝わない",
         ["co.menu.noOne"] = "手伝える人がいない",
         ["co.menu.skillShort"] = "技",
