@@ -336,6 +336,9 @@ return null;
     {
         try
         {
+            // Refresh the per-machine mode so the picker reflects the last choice.
+            try { ProcessorOutsourceMode.ModeUid = WorkbenchMemory.ReadProcessor(crafter?.owner); } catch { }
+
             int skillId = ProcessorWhitelist.ResolveSkillId(crafter);
             string skillName = GetSkillName(skillId);
             var options = new List<int> { MenuSelf, MenuAuto };
@@ -388,6 +391,8 @@ return null;
                     })
                 .SetSize(460f);
 
+            SelectCurrentMode(menu, options);
+
             string title = NpcLabor.LaborTerms.Process;
             try
             {
@@ -418,6 +423,41 @@ try
         {
             Plugin.LogWarn("processor mode menu failed: " + ex);
         }
+    }
+
+    /// <summary>Default-select the row matching the current mode (last chosen operator).</summary>
+    static void SelectCurrentMode(LayerList menu, List<int> options)
+    {
+        if (menu == null || menu.list == null || options == null)
+        {
+            return;
+        }
+
+        int? target = null;
+        int? mode = ProcessorOutsourceMode.ModeUid;
+        if (mode == ProcessorOutsourceMode.AutoSentinel)
+        {
+            target = MenuAuto;
+        }
+        else if (!mode.HasValue)
+        {
+            target = MenuSelf;
+        }
+        else
+        {
+            target = mode;
+        }
+
+        if (!target.HasValue)
+        {
+            return;
+        }
+
+        int idx = options.IndexOf(target.Value);
+        if (idx >= 0)
+        {
+            try { menu.list.Select(idx); } catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
+}
     }
 
     static string MenuLabel(int id, int skillId)

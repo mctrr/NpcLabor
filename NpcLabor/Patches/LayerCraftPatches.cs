@@ -31,6 +31,8 @@ internal static class LayerCraftPatches
         {
             EnsureButton(__instance);
             RefreshButtonLabel(__instance);
+            // Restore the per-workbench pin even when SetFactory was not hit.
+            try { AssistantResolver.PinnedUid = WorkbenchMemory.ReadCoCraft(__instance.factory); } catch { }
         }
         catch (System.Exception ex)
         {
@@ -657,6 +659,9 @@ Plugin.LogDebug(
     {
         try
         {
+            // Refresh the per-workbench pin so the picker reflects the last choice.
+            try { AssistantResolver.PinnedUid = WorkbenchMemory.ReadCoCraft(layer?.factory); } catch { }
+
             int skillId = GetRecipeSkillId(layer);
             string skillName = GetSkillName(skillId);
             var options = new List<int> { MenuAuto };
@@ -706,6 +711,8 @@ SE.Click();
                             menuOff: MenuOff);
                     })
                 .SetSize(460f);
+
+            SelectCurrentPin(menu, options);
 
             string title = skillName.IsEmpty() ? NpcLabor.LaborTerms.CoCraft : (NpcLabor.LaborTerms.CoCraft + " · " + skillName);
             try
@@ -864,6 +871,41 @@ return "";
             Msg.SayRaw(NpcLabor.LaborText.T("co.msg.pinFailed"));
         }
         try { WorkbenchMemory.WriteCoCraft(layer?.factory, AssistantResolver.PinnedUid); } catch { }
+    }
+
+    /// <summary>Default-select the row matching the current pin (last chosen assistant).</summary>
+    static void SelectCurrentPin(LayerList menu, List<int> options)
+    {
+        if (menu == null || menu.list == null || options == null)
+        {
+            return;
+        }
+
+        int? target = null;
+        int? pin = AssistantResolver.PinnedUid;
+        if (pin == AssistantResolver.AutoSentinel)
+        {
+            target = MenuAuto;
+        }
+        else if (pin == AssistantResolver.OffSentinel || !pin.HasValue)
+        {
+            target = MenuOff;
+        }
+        else
+        {
+            target = pin;
+        }
+
+        if (!target.HasValue)
+        {
+            return;
+        }
+
+        int idx = options.IndexOf(target.Value);
+        if (idx >= 0)
+        {
+            try { menu.list.Select(idx); } catch (System.Exception __e) { Plugin.LogDebug("LayerCraftPatches.cs silent catch: " + __e.Message); }
+}
     }
 
     static void RefreshButtonLabel(LayerCraft layer)
