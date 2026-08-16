@@ -49,6 +49,8 @@ internal static class ProcessorJobSession
     internal static int SuspendedAtRaw;
     /// <summary>Ignore freestanding AI cancel for a few frames after resume SetAI.</summary>
     internal static int ResumeIgnoreCancelUntilFrame;
+    /// <summary>Bounded retries when the freestanding process AI is cancelled on the work zone (e.g. a lingering wait order). Resets on job start / clear / successful craft.</summary>
+    internal static int AiRestartBudget = 3;
 
     // Strong refs: installed furniture is not always found via map uid lookup alone.
     internal static TraitCrafter? CrafterRef;
@@ -292,6 +294,7 @@ internal static class ProcessorJobSession
         Suspended = false;
         SuspendedAtRaw = 0;
         ResumeIgnoreCancelUntilFrame = 0;
+        AiRestartBudget = 3;
         try
         {
             WorkZoneUid = EClass._zone != null ? EClass._zone.uid : 0;
@@ -341,6 +344,10 @@ internal static class ProcessorJobSession
             Clear("ai-set-fail", announce: false);
             return false;
         }
+
+        // Belt-and-suspenders: SetAI already removes ConWait, but a wait order can
+        // re-apply it between the kick and the next tick.
+        try { worker.RemoveCondition<ConWait>(); } catch { }
 
         return true;
     }
@@ -424,6 +431,170 @@ internal static class ProcessorJobSession
         }
     }
 
+    /// <summary>Parked claimed stacks still sitting on the machine.</summary>
+    internal static bool HasUnconsumedIngredients()
+    {
+        for (int i = 0; i < Ingredients.Count; i++)
+        {
+            Thing? t = Ingredients[i];
+            if (t != null && !t.isDestroyed && t.Num > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Leftover parked stacks after Remaining hits 0 are refunded on Clear.
+    /// Never refill Remaining from leftover Num — that duplicated last-unit crafts.
+    /// </summary>
+    internal static bool TryContinueLeftover()
+    {
+        return Active && !Suspended && Remaining > 0;
+    }
+
+    /// <summary>
+    /// Take one craft piece the same way vanilla AI_UseCrafter does:
+    /// Split(1). Last unit returns the parked stack itself; do not Duplicate.
+    /// </summary>
+    internal static bool TryTakeCraftPiece(
+        Thing src,
+        TraitCrafter crafter,
+        Card? machine,
+        Chara worker,
+        out Thing? piece)
+    {
+        piece = null;
+        if (src == null || src.isDestroyed || src.Num <= 0 || worker == null)
+        {
+            return false;
+        }
+
+        bool consumeIng = true;
+        try { consumeIng = crafter == null || crafter.IsConsumeIng; } catch { consumeIng = true; }
+        try
+        {
+            piece = src.Split(1);
+        }
+        catch
+        {
+            piece = null;
+        }
+
+        if (piece == null || piece.isDestroyed)
+        {
+            piece = null;
+            return false;
+        }
+
+        if (consumeIng && EClass._zone != null)
+        {
+            try
+            {
+                Point place = (machine != null && machine.ExistsOnMap)
+                    ? machine.pos
+                    : worker.pos;
+                if (!piece.ExistsOnMap)
+                {
+                    Card card = EClass._zone.AddCard(piece, place);
+                    try { card.altitude = (machine != null && machine.ExistsOnMap) ? 0 : 1; } catch { }
+                    piece = card as Thing ?? piece;
+                }
+
+                PrepareCraftPiece(piece, crafter);
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogDebug("take craft piece place: " + ex.Message);
+                if (piece != null && !piece.isDestroyed && !ReferenceEquals(piece, src))
+                {
+                    try { piece.Destroy(); } catch { }
+                }
+                return false;
+            }
+        }
+        else
+        {
+            PrepareCraftPiece(piece, crafter);
+        }
+
+        return piece != null && !piece.isDestroyed;
+    }
+
+    /// <summary>
+    /// Destroy the Split work pieces, including last-unit parked stacks.
+    /// Vanilla AI_UseCrafter does the same Destroy after Craft.
+    /// </summary>
+    internal static bool ConsumeCraftCycle(List<Thing> ings)
+    {
+        if (ings == null || ings.Count == 0)
+        {
+            return false;
+        }
+
+        bool ok = true;
+        for (int i = 0; i < ings.Count; i++)
+        {
+            Thing? piece = ings[i];
+            if (piece == null || piece.isDestroyed)
+            {
+                ok = false;
+                continue;
+            }
+
+            int before = 0;
+            try { before = piece.Num; } catch { before = 0; }
+            try { piece.Destroy(); }
+            catch
+            {
+                ok = false;
+                continue;
+            }
+
+            if (!piece.isDestroyed && piece.Num >= before && before > 0)
+            {
+                ok = false;
+            }
+        }
+
+        SyncIngredientMarksAfterCraft();
+        return ok;
+    }
+
+    internal static void RestartWorkerAi(string reason)
+    {
+        if (!Active || Suspended)
+        {
+            return;
+        }
+
+        Chara? worker = GetWorker();
+        if (worker == null || worker.isDead)
+        {
+            return;
+        }
+
+        try { ResumeIgnoreCancelUntilFrame = Time.frameCount + 3; } catch { ResumeIgnoreCancelUntilFrame = 0; }
+        Plugin.LogInfo($"processor restart ai ({reason}) npc={NpcUid} left={Remaining}");
+        try
+        {
+            worker.SetAIImmediate(new AI_NpcProcess
+            {
+                jobToken = NpcUid ^ MachineUid ^ Remaining
+            });
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogWarn("processor leftover SetAI failed: " + ex.Message);
+        }
+
+        try { worker.RemoveCondition<ConWait>(); } catch { }
+    }
+
+    internal static void ResetAiRestartBudget() => AiRestartBudget = 3;
+
     internal static void Clear(string reason, bool announce = true)
     {
         if (!Active && NpcUid == 0)
@@ -481,6 +652,7 @@ internal static class ProcessorJobSession
         LastCostSp = 0;
         SuspendedAtRaw = 0;
         ResumeIgnoreCancelUntilFrame = 0;
+        AiRestartBudget = 3;
 
         if (restoreParty && restoreUid > 0)
         {
@@ -808,7 +980,37 @@ internal static class ProcessorJobSession
             return;
         }
 
+        // Transient AI override (e.g. a lingering wait order) cancelled the process AI
+        // while the job is still valid here — re-assert instead of wiping the job.
+        if (reason == "ai-cancel" && TryRestartAfterInterrupt())
+        {
+            return;
+        }
+
         Clear(string.IsNullOrEmpty(reason) ? "ai-cancel" : reason);
+    }
+
+    /// <summary>
+    /// Re-assert the process AI after an ai-cancel on the work zone, bounded by
+    /// AiRestartBudget so we never fight a persistent goal forever.
+    /// </summary>
+    static bool TryRestartAfterInterrupt()
+    {
+        if (AiRestartBudget <= 0)
+        {
+            return false;
+        }
+
+        Chara? worker = GetWorker();
+        if (worker == null || worker.isDead)
+        {
+            return false;
+        }
+
+        AiRestartBudget--;
+        try { worker.RemoveCondition<ConWait>(); } catch { }
+        RestartWorkerAi("ai-cancel-retry");
+        return true;
     }
 
     static void SuspendForZoneLeave()
@@ -851,15 +1053,17 @@ internal static class ProcessorJobSession
             Plugin.LogDebug("processor suspend stop ai: " + ex.Message);
         }
 
-        string name = NpcName ?? NpcLabor.LaborText.T("proc.msg.residentFallback");
-        try
-        {
-            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.zoneContinue", name, NpcLabor.LaborTerms.Process));
-        }
-        catch { }
-
         Plugin.LogInfo(
             $"processor suspend leave npc={NpcUid} left={Remaining} workZone={WorkZoneUid} raw={SuspendedAtRaw}");
+
+        try
+        {
+            string name = NpcName ?? NpcLabor.LaborText.T("proc.msg.residentFallback");
+            Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.zoneContinue", name, NpcLabor.LaborTerms.Process));
+        }
+        catch
+        {
+        }
     }
 
     /// <summary>PC entered a zone — if it is the work map, catch up then resume leftover work.</summary>
@@ -958,9 +1162,11 @@ internal static class ProcessorJobSession
 
         if (Remaining <= 0)
         {
-            // Catch-up finished the whole job while PC was away.
-            Clear("ai-end");
-            return;
+            if (!TryContinueLeftover())
+            {
+                Clear("ai-end");
+                return;
+            }
         }
 
         // Still work left — resume freestanding AI on this map.
@@ -987,6 +1193,9 @@ internal static class ProcessorJobSession
             Plugin.LogWarn("processor resume SetAI failed: " + ex.Message);
             Clear("ai-set-fail", announce: false);
         }
+
+        try { worker.RemoveCondition<ConWait>(); } catch { }
+        AiRestartBudget = 3;
     }
 
 
@@ -1246,6 +1455,13 @@ internal static class ProcessorJobSession
 
         if (Completed > 0)
         {
+            // Mid-job abort after some crafts is not "finished".
+            if (reason == "ai-fail" || reason == "ai-cancel" || Remaining > 0)
+            {
+                Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.interrupted", name, NpcLabor.LaborTerms.Process));
+                return;
+            }
+
             if (ExpGranted > 0)
             {
                 Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.doneSkilled", name, NpcLabor.LaborTerms.Process));
@@ -1272,6 +1488,9 @@ internal static class ProcessorJobSession
                 break;
             case "no-ings":
                 Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.noMaterial", name));
+                break;
+            case "stuck":
+                Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.stuck", name));
                 break;
             case "machine-gone":
                 Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.noMachine", name));

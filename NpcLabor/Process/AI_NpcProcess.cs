@@ -11,6 +11,11 @@ internal class AI_NpcProcess : AIAct
 {
     /// <summary>Unused marker so the type is distinct per start; real state lives in ProcessorJobSession.</summary>
     internal int jobToken;
+    /// <summary>Set when WalkToMachine gives up because the path to the machine is permanently blocked (distinct from machine-gone).</summary>
+    internal string? walkFailReason;
+
+    /// <summary>Stuck-detection: if the worker makes no progress toward the machine for this many AI ticks, snap it next to the machine (vanilla AI_Goto stalls forever on chara-occupied tiles).</summary>
+    const int StuckSnapThreshold = 90;
 
     public override bool CanManualCancel() => true;
 
@@ -37,6 +42,12 @@ internal class AI_NpcProcess : AIAct
             if (ProcessorJobSession.Remaining <= 0)
             {
                 ProcessorJobSession.Clear("ai-end");
+                return;
+            }
+
+            if (ProcessorJobSession.Remaining > 0)
+            {
+                ProcessorJobSession.RestartWorkerAi("onsuccess-remaining");
             }
         }
     }
@@ -50,6 +61,8 @@ internal class AI_NpcProcess : AIAct
             yield break;
         }
 
+        walkFailReason = null;
+
         TraitCrafter? crafter = ProcessorJobSession.GetCrafter();
         Card? machine = crafter?.owner;
         if (crafter == null || machine == null || machine.isDestroyed)
@@ -59,10 +72,16 @@ internal class AI_NpcProcess : AIAct
             yield break;
         }
 
-        // Walk next to the machine.
+        // Walk next to the machine. Vanilla AI_Goto can stall forever on a
+        // chara-occupied tile, so WalkToMachine snaps the worker next to the
+        // machine after StuckSnapThreshold ticks without progress.
         if (machine.ExistsOnMap)
         {
-            yield return DoGoto(machine, 1);
+            foreach (Status s in WalkToMachine(machine))
+            {
+                yield return s;
+            }
+
             if (owner == null || owner.isDead)
             {
                 ProcessorJobSession.Clear("ai-fail");
@@ -72,7 +91,7 @@ internal class AI_NpcProcess : AIAct
 
             if (machine.isDestroyed || owner.Dist(machine) > 1)
             {
-                ProcessorJobSession.Clear("machine-gone");
+                ProcessorJobSession.Clear(machine.isDestroyed ? "machine-gone" : (walkFailReason ?? "machine-gone"));
                 yield return Cancel();
                 yield break;
             }
@@ -110,10 +129,14 @@ internal class AI_NpcProcess : AIAct
             // Keep adjacency if we drifted.
             if (machine.ExistsOnMap && owner.Dist(machine) > 1)
             {
-                yield return DoGoto(machine, 1);
+                foreach (Status s in WalkToMachine(machine))
+                {
+                    yield return s;
+                }
+
                 if (owner == null || owner.isDead || machine.isDestroyed || owner.Dist(machine) > 1)
                 {
-                    ProcessorJobSession.Clear("machine-gone");
+                    ProcessorJobSession.Clear(machine.isDestroyed ? "machine-gone" : (walkFailReason ?? "machine-gone"));
                     yield return Cancel();
                     yield break;
                 }
@@ -163,18 +186,8 @@ internal class AI_NpcProcess : AIAct
                     yield break;
                 }
 
-                Thing? piece = null;
-                bool splitFail = false;
-                try
-                {
-                    piece = src.Split(1);
-                }
-                catch
-                {
-                    splitFail = true;
-                }
-
-                if (splitFail || piece == null)
+                if (!ProcessorJobSession.TryTakeCraftPiece(src, crafter, machine, owner, out Thing? piece)
+                    || piece == null)
                 {
                     CleanupPartialIngs(ings);
                     ProcessorJobSession.Clear("no-ings");
@@ -191,27 +204,6 @@ internal class AI_NpcProcess : AIAct
                 if (piece.blessedState > BlessedState.Normal && blessed == BlessedState.Normal)
                 {
                     blessed = piece.blessedState;
-                }
-
-                if (crafter.IsConsumeIng)
-                {
-                    try
-                    {
-                        Point place = machine.ExistsOnMap ? machine.pos : owner.pos;
-                        Card card = EClass._zone.AddCard(piece, place);
-                        card.altitude = machine.ExistsOnMap ? 0 : 1;
-                        // Split may copy hide flags from parked bulk; re-apply craft-visible rules.
-                        ProcessorJobSession.PrepareCraftPiece(card as Thing ?? piece, crafter);
-                    }
-                    catch (System.Exception ex)
-                    {
-                        Plugin.LogWarn("place ingredient failed: " + ex.Message);
-                    }
-                }
-                else
-                {
-                    // Non-consume path still keeps the piece out of PC bag.
-                    ProcessorJobSession.PrepareCraftPiece(piece, crafter);
                 }
             }
 
@@ -260,6 +252,7 @@ internal class AI_NpcProcess : AIAct
 
             Progress_Custom progress = new Progress_Custom
             {
+                cancelWhenMoved = false,
                 canProgress = () =>
                 {
                     if (requireOn && (machine == null || !machine.isOn))
@@ -274,7 +267,12 @@ internal class AI_NpcProcess : AIAct
 
                     foreach (Thing ing in ings)
                     {
-                        if (ing == null || ing.isDestroyed)
+                        if (ing == null)
+                        {
+                            return false;
+                        }
+
+                        if (ing.isDestroyed)
                         {
                             return false;
                         }
@@ -343,8 +341,9 @@ yield return Do(progress);
 
             if (progress.status == Status.Fail)
             {
-                // Return leftover non-destroyed ings to PC.
-                ReturnIngs(ings);
+                Plugin.LogInfo(
+                    $"processor progress fail left={ProcessorJobSession.Remaining} done={ProcessorJobSession.Completed}");
+                CleanupPartialIngs(ings);
                 ProcessorJobSession.HandleAiInterrupted("ai-fail");
                 yield return Cancel();
                 yield break;
@@ -363,7 +362,8 @@ yield return Do(progress);
         }
 
         // Clean end of loop (suspend exits while via !Active/Suspended — do not Clear held jobs).
-        if (ProcessorJobSession.Active && !ProcessorJobSession.Suspended && ProcessorJobSession.Remaining <= 0)
+        if (ProcessorJobSession.Active && !ProcessorJobSession.Suspended
+            && ProcessorJobSession.Remaining <= 0)
         {
             TraitCrafter? c2 = ProcessorJobSession.GetCrafter();
             if (c2 != null && c2.AutoTurnOff && c2.owner != null && c2.owner.isOn)
@@ -388,6 +388,175 @@ yield return Do(progress);
         }
 
         yield return Success();
+    }
+
+    /// <summary>
+    /// Walk next to the machine with stuck detection. Vanilla AI_Goto waits forever
+    /// on chara-occupied tiles (Chara.CanMoveTo blocks NPC entry unless CanReplace),
+    /// so if the worker makes no progress for StuckSnapThreshold ticks we snap them
+    /// to a free tile next to the machine and re-path. Gives up after 3 failed snaps.
+    /// </summary>
+    IEnumerable<Status> WalkToMachine(Card machine)
+    {
+        if (owner == null || owner.isDead || machine == null || machine.isDestroyed || !machine.ExistsOnMap)
+        {
+            yield break;
+        }
+
+        int stuckTicks = 0;
+        int snapCount = 0;
+        int lastDist = owner.Dist(machine);
+        SetChild(new AI_Goto(machine, 1), KeepRunning);
+        while (child != null && child.status == Status.Running)
+        {
+            TickChild();
+            if (owner == null || owner.isDead || machine.isDestroyed)
+            {
+                yield break;
+            }
+
+            int dist = owner.Dist(machine);
+            if (dist <= 1)
+            {
+                yield break;
+            }
+
+            if (dist < lastDist)
+            {
+                lastDist = dist;
+                stuckTicks = 0;
+            }
+            else
+            {
+                stuckTicks++;
+                if (stuckTicks >= StuckSnapThreshold)
+                {
+                    if (++snapCount > 3)
+                    {
+                        // No free tile near the machine or the path is permanently blocked.
+                        walkFailReason = "stuck";
+                        yield break;
+                    }
+
+                    if (TrySnapNearMachine(machine))
+                    {
+                        lastDist = owner.Dist(machine);
+                        stuckTicks = 0;
+                        // Stale child path — re-path from the new spot.
+                        SetChild(new AI_Goto(machine, 1), KeepRunning);
+                        continue;
+                    }
+
+                    // No free tile found; wait and retry the snap later.
+                    stuckTicks = 0;
+                }
+            }
+
+            yield return Status.Running;
+        }
+    }
+
+    /// <summary>
+    /// Snap the worker onto a free tile next to the machine without cancelling the
+    /// running AI. Mirrors town-labor PlaceWorkerNearClient: MoveImmediate avoids
+    /// Card.Teleport, which cancels the chara's AI (would kill this iterator).
+    /// </summary>
+    bool TrySnapNearMachine(Card machine)
+    {
+        if (owner == null || owner.isDead || machine == null || machine.isDestroyed
+            || !machine.ExistsOnMap || machine.pos == null || !owner.ExistsOnMap)
+        {
+            return false;
+        }
+
+        try
+        {
+            Point? dest = FindFreePointNear(machine.pos);
+            if (dest == null || !dest.IsValid || !dest.IsInBounds || dest.Equals(machine.pos))
+            {
+                return false;
+            }
+
+            if (EClass.pc != null && EClass.pc.pos != null && dest.Equals(EClass.pc.pos))
+            {
+                return false;
+            }
+
+            owner.MoveImmediate(dest, focus: false, cancelAI: false);
+            // True as long as the worker actually moved — the caller re-paths and
+            // walks the remaining tile (snap may land 2 away when all adjacent
+            // tiles are occupied).
+            return owner.ExistsOnMap;
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("processor snap near machine: " + ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>Free point near origin (mirrors town-labor FindNearPoint): not blocked, not the PC, not another chara. Prefers distance-1 adjacency.</summary>
+    Point? FindFreePointNear(Point origin)
+    {
+        if (origin == null)
+        {
+            return null;
+        }
+
+        int[] dx = { 1, -1, 0, 0, 1, 1, -1, -1, 2, -2, 0, 0, 2, 2, -2, -2, 3, -3, 0, 0 };
+        int[] dy = { 0, 0, 1, -1, 1, -1, 1, -1, 0, 0, 2, -2, 2, -2, 2, -2, 0, 0, 3, -3 };
+        Point? pcPos = null;
+        try { pcPos = EClass.pc?.pos; } catch { pcPos = null; }
+
+        for (int i = 0; i < dx.Length; i++)
+        {
+            try
+            {
+                Point p = new Point(origin.x + dx[i], origin.z + dy[i]);
+                if (!p.IsValid || !p.IsInBounds)
+                {
+                    continue;
+                }
+
+                if (p.IsBlocked)
+                {
+                    continue;
+                }
+
+                if (pcPos != null && p.Equals(pcPos))
+                {
+                    continue;
+                }
+
+                if (p.Equals(origin))
+                {
+                    continue;
+                }
+
+                if (p.HasChara)
+                {
+                    bool self = false;
+                    try
+                    {
+                        if (owner != null && owner.pos != null && p.Equals(owner.pos))
+                        {
+                            self = true;
+                        }
+                    }
+                    catch { }
+
+                    if (!self)
+                    {
+                        continue;
+                    }
+                }
+
+                return p;
+            }
+            catch { }
+        }
+
+        return null;
     }
 
     static int ComputeDuration(TraitCrafter crafter, AI_UseCrafter shell, int costSp)
@@ -473,6 +642,8 @@ int exp = 0;
                 // Slice B rule: product on ground - do not auto-pick to NPC or PC.
                 spawnedProduct = product;
                 craftedOk = true;
+                // A successful craft means the job is healthy again — refresh the restart budget.
+                ProcessorJobSession.ResetAiRestartBudget();
             }
         }
         catch (System.Exception ex)
@@ -491,36 +662,7 @@ int exp = 0;
 
             if (isConsume)
             {
-                consumedOk = ings.Count > 0;
-                for (int m = 0; m < ings.Count; m++)
-                {
-                    Thing? piece = ings[m];
-                    if (piece == null)
-                    {
-                        consumedOk = false;
-                        continue;
-                    }
-
-                    if (piece.isDestroyed)
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        piece.Destroy();
-                    }
-                    catch (System.Exception __e)
-                    {
-                        Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message);
-                        consumedOk = false;
-                    }
-
-                    if (!piece.isDestroyed)
-                    {
-                        consumedOk = false;
-                    }
-                }
+                consumedOk = ProcessorJobSession.ConsumeCraftCycle(ings);
             }
             else
             {
@@ -688,30 +830,10 @@ int exp = 0;
             for (int i = 0; i < sources.Count; i++)
             {
                 Thing src = sources[i];
-                int numBeforeSplit = src.Num;
-                Thing? piece = null;
-                try { piece = src.Split(1); } catch { piece = null; }
-                if (piece == null || piece.isDestroyed)
+                if (!ProcessorJobSession.TryTakeCraftPiece(src, crafter, machine, worker, out Thing? piece)
+                    || piece == null)
                 {
                     CleanupPartialIngs(ings);
-                    return false;
-                }
-
-                // If Split returned the same full stack object without decreasing Num,
-                // bulk accounting is wrong - abort rather than craft free goods.
-                if (ReferenceEquals(piece, src) && numBeforeSplit <= 1)
-                {
-                    // Last unit: vanilla Split returns the same Thing; Num stays 1 until Destroy.
-                }
-                else if (!ReferenceEquals(piece, src) && src.Num != numBeforeSplit - 1 && src.Num != numBeforeSplit)
-                {
-                    // Unexpected; continue with Destroy path but log.
-                    Plugin.LogDebug($"catch-up split num odd before={numBeforeSplit} after={src.Num}");
-                }
-                else if (ReferenceEquals(piece, src) && numBeforeSplit > 1)
-                {
-                    CleanupPartialIngs(ings);
-                    Plugin.LogDebug("catch-up abort: Split returned whole stack unexpectedly");
                     return false;
                 }
 
@@ -723,37 +845,6 @@ int exp = 0;
                 if (piece.blessedState > BlessedState.Normal && blessed == BlessedState.Normal)
                 {
                     blessed = piece.blessedState;
-                }
-
-                if (crafter.IsConsumeIng)
-                {
-                    try
-                    {
-                        Point place = machine.ExistsOnMap ? machine.pos : worker.pos;
-                        if (EClass._zone != null)
-                        {
-                            // Last-unit Split returns the parked bulk itself; it is already on map.
-                            if (!piece.ExistsOnMap)
-                            {
-                                Card card = EClass._zone.AddCard(piece, place);
-                                try { card.altitude = machine.ExistsOnMap ? 0 : 1; } catch { }
-                                ProcessorJobSession.PrepareCraftPiece(card as Thing ?? piece, crafter);
-                            }
-                            else
-                            {
-                                ProcessorJobSession.PrepareCraftPiece(piece, crafter);
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        CleanupPartialIngs(ings);
-                        return false;
-                    }
-                }
-                else
-                {
-                    ProcessorJobSession.PrepareCraftPiece(piece, crafter);
                 }
             }
 
@@ -839,6 +930,7 @@ int exp = 0;
             return;
         }
 
+        List<Thing> sources = ProcessorJobSession.Ingredients;
         foreach (Thing t in ings)
         {
             if (t == null || t.isDestroyed)
@@ -846,9 +938,29 @@ int exp = 0;
                 continue;
             }
 
+            bool parked = false;
+            if (sources != null)
+            {
+                for (int i = 0; i < sources.Count; i++)
+                {
+                    if (ReferenceEquals(t, sources[i]))
+                    {
+                        parked = true;
+                        break;
+                    }
+                }
+            }
+
+            if (parked)
+            {
+                continue;
+            }
+
             try
             {
-                ProcessorJobSession.ReturnOneIngredientToPc(t);
+                // Split-off work pieces only. Last-unit Split returns the parked
+                // stack itself; leave it so a cancelled Progress can resume.
+                t.Destroy();
             }
             catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
         }
