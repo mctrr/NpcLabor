@@ -78,7 +78,7 @@ internal class AI_TownLabor : AIAct
 
             if (offMap)
             {
-                yield return DoIdle(60 + EClass.rnd(40));
+                yield return DoWait(60 + EClass.rnd(40));
                 continue;
             }
 
@@ -118,7 +118,7 @@ internal class AI_TownLabor : AIAct
             {
             }
 
-            yield return DoIdle(80 + EClass.rnd(60));
+            yield return DoWait(80 + EClass.rnd(60));
         }
     }
 }

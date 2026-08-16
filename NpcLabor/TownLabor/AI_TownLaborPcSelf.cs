@@ -241,8 +241,7 @@ internal class AI_TownLaborPcSelf : AIAct
             {
             }
 
-            // Shorter idle chunks so turbo + hour ticks feel responsive.
-            yield return DoIdle(40 + EClass.rnd(30));
+            yield return DoWait(40 + EClass.rnd(30));
         }
     }
 }
