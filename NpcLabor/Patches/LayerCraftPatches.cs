@@ -46,6 +46,7 @@ internal static class LayerCraftPatches
         {
             EnsureButton(__instance);
             RefreshButtonLabel(__instance);
+            try { AssistantResolver.PinnedUid = WorkbenchMemory.ReadCoCraft(__instance.factory); } catch { }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LayerCraftPatches.cs silent catch: " + __e.Message); }
 }
@@ -683,7 +684,7 @@ Plugin.LogDebug(
                     id => MenuLabel(id),
                     (id, item) =>
                     {
-                        ApplyMenuChoice(id);
+                        ApplyMenuChoice(id, layer);
                         RefreshButtonLabel(layer);
                         try
                         {
@@ -819,12 +820,13 @@ SE.Click();
 return "";
     }
 
-    static void ApplyMenuChoice(int id)
+    static void ApplyMenuChoice(int id, LayerCraft? layer = null)
     {
         if (id == MenuAuto)
         {
             AssistantResolver.SetPin(AssistantResolver.AutoSentinel);
             Msg.SayRaw(NpcLabor.LaborText.T("co.msg.autoSet"));
+            try { WorkbenchMemory.WriteCoCraft(layer?.factory, AssistantResolver.PinnedUid); } catch { }
             return;
         }
 
@@ -832,6 +834,7 @@ return "";
         {
             AssistantResolver.SetPin(AssistantResolver.OffSentinel);
             Msg.SayRaw(NpcLabor.LaborText.T("co.msg.off"));
+            try { WorkbenchMemory.WriteCoCraft(layer?.factory, AssistantResolver.PinnedUid); } catch { }
             return;
         }
 
@@ -845,6 +848,7 @@ return "";
         {
             Msg.SayRaw(NpcLabor.LaborText.T("co.msg.pinFailed"));
         }
+        try { WorkbenchMemory.WriteCoCraft(layer?.factory, AssistantResolver.PinnedUid); } catch { }
     }
 
     static void RefreshButtonLabel(LayerCraft layer)

@@ -153,6 +153,7 @@ internal static class LayerDragGridPatches
             return;
         }
 
+        try { ProcessorOutsourceMode.ModeUid = WorkbenchMemory.ReadProcessor(crafter?.owner); } catch { }
         if (existing != null)
         {
             existing.gameObject.SetActive(true);
@@ -494,6 +495,7 @@ try
         {
             ProcessorOutsourceMode.SetOff();
             Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.selfMode"));
+            try { WorkbenchMemory.WriteProcessor(crafter?.owner, ProcessorOutsourceMode.ModeUid); } catch { }
             return;
         }
 
@@ -511,6 +513,7 @@ try
                 Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.autoNone"));
             }
 
+            try { WorkbenchMemory.WriteProcessor(crafter?.owner, ProcessorOutsourceMode.ModeUid); } catch { }
             return;
         }
 
@@ -524,6 +527,7 @@ try
         {
             Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.pinFailed"));
         }
+        try { WorkbenchMemory.WriteProcessor(crafter?.owner, ProcessorOutsourceMode.ModeUid); } catch { }
     }
 
     static void RefreshLabel(UIButton btn, TraitCrafter crafter)
