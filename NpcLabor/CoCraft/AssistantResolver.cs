@@ -143,8 +143,11 @@ return true;
         }
     }
 
-    internal static List<Chara> ListEligible(int skillId = 0)
+    internal static List<Chara> ListEligible()
     {
+        // Party companions first, then stable uid order. Auto mode picks the
+        // highest-skill NPC (FindBestForSkill), so the list itself is not sorted
+        // by skill — that ordering never ran (callers pass no skillId).
         var list = new List<Chara>();
         foreach (Chara c in EnumerateEligible())
         {
@@ -156,25 +159,7 @@ return true;
             int pa = IsPartyMember(a) ? 0 : 1;
             int pb = IsPartyMember(b) ? 0 : 1;
             int cmp = pa.CompareTo(pb);
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            // Second key: relevant skill (descending), only when skillId > 0
-            if (skillId > 0)
-            {
-                int sa = a.Evalue(skillId);
-                int sb = b.Evalue(skillId);
-                int scmp = sb.CompareTo(sa); // descending
-                if (scmp != 0)
-                {
-                    return scmp;
-                }
-            }
-
-            // Final key: uid (stable)
-            return a.uid.CompareTo(b.uid);
+            return cmp != 0 ? cmp : a.uid.CompareTo(b.uid);
         });
         return list;
     }
