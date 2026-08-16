@@ -4,10 +4,10 @@ using System.Collections.Generic;
 namespace NpcLabor;
 
 /// <summary>
-/// Lightweight player-facing strings. CN default; EN when game lang is English.
+/// Lightweight player-facing strings. CN default; EN / JP when the game language matches.
 /// Keep lean tone; no spreadsheet dumps.
 /// </summary>
-internal static class LaborText
+internal static partial class LaborText
 {
     static readonly Dictionary<string, string> Cn = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -118,9 +118,10 @@ internal static class LaborText
         ["proc.msg.noFuel"] = "燃料不够，{0}停下了。",
         ["proc.msg.noMaterial"] = "材料用完了，{0}停下了。",
         ["proc.msg.noMachine"] = "机器不见了，{0}停下了。",
+        ["proc.msg.stuck"] = "路被堵住了，{0}停下了。",
         ["proc.msg.exhausted"] = "{0}太累了，停下了。",
         ["proc.msg.ended"] = "{0}的{1}结束了。",
-        ["proc.msg.zoneContinue"] = "{0}留在原地图继续{1}（回来后再结算进度）。",
+        ["proc.msg.zoneContinue"] = "{0}留在原地图继续{1}。",
         ["proc.msg.zoneResume"] = "{0}继续加工（剩余 {1} 次）。",
 
         // ---- craft UI ----
@@ -467,9 +468,10 @@ internal static class LaborText
         ["proc.msg.noFuel"] = "Out of fuel; {0} stopped.",
         ["proc.msg.noMaterial"] = "Materials ran out; {0} stopped.",
         ["proc.msg.noMachine"] = "The machine is gone; {0} stopped.",
+        ["proc.msg.stuck"] = "The path is blocked; {0} stopped.",
         ["proc.msg.exhausted"] = "{0} is exhausted and stopped.",
         ["proc.msg.ended"] = "{0}'s {1} is done.",
-        ["proc.msg.zoneContinue"] = "{0} stays on the old map for {1} (progress settles when you return).",
+        ["proc.msg.zoneContinue"] = "{0} stays on the old map and keeps working.",
         ["proc.msg.zoneResume"] = "{0} resumes processing ({1} left).",
 
         // ---- craft UI ----
@@ -709,8 +711,13 @@ internal static class LaborText
 
     internal static string T(string key)
     {
-        Dictionary<string, string> primary = UseEnglish() ? En : Cn;
+        Dictionary<string, string> primary = PickTable();
         if (primary.TryGetValue(key, out string? s) && !string.IsNullOrEmpty(s))
+        {
+            return s;
+        }
+
+        if (primary != En && En.TryGetValue(key, out s) && !string.IsNullOrEmpty(s))
         {
             return s;
         }
@@ -743,13 +750,17 @@ internal static class LaborText
 
     /// <summary>
     /// Prefer English only when game language looks English.
-    /// Anything else (CN/JP/unknown) keeps Chinese defaults for this mod's audience.
     /// Uses reflection so missing Lang fields never break the build.
     /// </summary>
     static bool UseEnglish()
     {
         try
         {
+            if (ProbeLangFlag("isEN"))
+            {
+                return true;
+            }
+
             string? code = ProbeLangCode();
             if (code == null || code.Length == 0)
             {
@@ -763,6 +774,79 @@ internal static class LaborText
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Prefer Japanese when game language looks JP/JA.
+    /// </summary>
+    static bool UseJapanese()
+    {
+        try
+        {
+            if (ProbeLangFlag("isJP") || ProbeLangFlag("isJA"))
+            {
+                return true;
+            }
+
+            string? code = ProbeLangCode();
+            if (code == null || code.Length == 0)
+            {
+                return false;
+            }
+
+            string c = code!.Trim().ToLowerInvariant();
+            return c == "jp" || c == "ja" || c.StartsWith("jp") || c.StartsWith("ja")
+                || c.Contains("japan");
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static Dictionary<string, string> PickTable()
+    {
+        if (UseEnglish())
+        {
+            return En;
+        }
+
+        if (UseJapanese())
+        {
+            return Ja;
+        }
+
+        return Cn;
+    }
+
+    static bool ProbeLangFlag(string name)
+    {
+        try
+        {
+            Type? langType = typeof(EClass).Assembly.GetType("Lang")
+                ?? Type.GetType("Lang");
+            if (langType == null)
+            {
+                return false;
+            }
+
+            var f = langType.GetField(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            if (f != null && f.FieldType == typeof(bool))
+            {
+                return (bool)f.GetValue(null);
+            }
+
+            var prop = langType.GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            if (prop != null && prop.PropertyType == typeof(bool))
+            {
+                return (bool)prop.GetValue(null, null);
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     static string? ProbeLangCode()

@@ -4,7 +4,7 @@ namespace NpcLabor;
 
 /// <summary>
 /// Player-facing product names. Keep one vocabulary across UI / msg / quest titles.
-/// Strings resolve through LaborText (CN default / EN when game lang is English).
+/// Strings resolve through LaborText (CN default / EN or JP when the game language matches).
 /// Unlock levels come from LaborConfig.
 /// </summary>
 internal static class LaborTerms
