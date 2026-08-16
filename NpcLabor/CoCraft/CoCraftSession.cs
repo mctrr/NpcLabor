@@ -127,6 +127,10 @@ internal static class CoCraftSession
         }
 
         TeleportToPc(assistant);
+        // Pin the assistant beside the PC before crafting starts so they never
+        // wander off mid-progress (teleport alone cancels their old AI and the
+        // branch can re-assign a goal that walks away).
+        HoldAssistant(assistant);
 
         NpcUid = assistant.uid;
         ReqSkillId = reqSkillId;
@@ -187,6 +191,57 @@ internal static class CoCraftSession
         }
     }
 
+    /// <summary>Pin the assistant in place beside the PC for the whole craft.</summary>
+    static void HoldAssistant(Chara c)
+    {
+        if (c == null)
+        {
+            return;
+        }
+
+        try { c.noMove = true; } catch { }
+        try
+        {
+            c.SetAI(new CoCraftStandAi());
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("co-craft hold assistant: " + ex.Message);
+        }
+    }
+
+    /// <summary>Free the assistant's movement and restore their default idle AI.</summary>
+    static void ReleaseAssistant()
+    {
+        if (NpcUid == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Chara? c = RefChara.Get(NpcUid);
+            if (c == null || c.isDestroyed)
+            {
+                return;
+            }
+
+            try { c.noMove = false; } catch { }
+            try
+            {
+                if (c.ai is CoCraftStandAi)
+                {
+                    c.SetNoGoal();
+                }
+            }
+            catch { }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("co-craft release assistant: " + ex.Message);
+        }
+    }
+
     internal static void RememberTiming(int costSp, int duration, int num)
     {
         if (!Active)
@@ -226,6 +281,8 @@ internal static class CoCraftSession
         {
             return;
         }
+
+        ReleaseAssistant();
 
         LastClearReason = reason ?? "";
         if (announce && Active)
