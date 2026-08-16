@@ -43,9 +43,9 @@ internal class CoCraftApproachAi : AIAct
                 yield break;
             }
 
-            if (owner.ExistsOnMap && owner.Dist(pc) <= 1)
+            if (owner.ExistsOnMap && pc.pos != null && owner.pos.Equals(pc.pos))
             {
-                break; // already beside the PC
+                break; // already standing in the PC's cell
             }
 
             int dist = owner.ExistsOnMap ? owner.Dist(pc) : 99;
@@ -59,7 +59,9 @@ internal class CoCraftApproachAi : AIAct
                 break; // path blocked — snap fallback below
             }
 
-            Status s = DoGoto(pc, 1);
+            // Walk into the PC's own cell (shared tile) so the PC's surrounding
+            // furniture/characters can never block the assistant.
+            Status s = DoGoto(pc, 0);
             if (s != Status.Running)
             {
                 break; // unreachable — snap fallback below
@@ -70,9 +72,10 @@ internal class CoCraftApproachAi : AIAct
 
         if (CoCraftSession.Active && owner != null && !owner.isDead)
         {
-            if (!(owner.ExistsOnMap && EClass.pc != null && owner.Dist(EClass.pc) <= 1))
+            if (!(owner.ExistsOnMap && EClass.pc != null && EClass.pc.pos != null
+                && owner.pos.Equals(EClass.pc.pos)))
             {
-                // Blocked / too slow: snap beside the PC as a last resort.
+                // Blocked / too slow: snap into the PC's cell as a last resort.
                 CoCraftSession.SnapAssistantToPc(owner);
             }
 

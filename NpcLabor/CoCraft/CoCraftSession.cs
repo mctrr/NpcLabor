@@ -174,16 +174,25 @@ internal static class CoCraftSession
         }
     }
 
-    /// <summary>True when the assistant is standing beside the PC (craft may progress).</summary>
+    /// <summary>
+    /// True when the assistant is standing in the PC's cell (craft may progress).
+    /// Resolves the NPC directly — GetAssistant/IsValidAssistant would reject them
+    /// because LaborBusy marks the session's own assistant as busy.
+    /// </summary>
     internal static bool IsAssistantReady()
     {
-        Chara? c = GetAssistant();
-        if (c == null || EClass.pc == null || !c.ExistsOnMap || !EClass.pc.ExistsOnMap)
+        if (!Active || NpcUid == 0 || EClass.pc == null)
         {
             return false;
         }
 
-        return c.Dist(EClass.pc) <= 1;
+        Chara? c = RefChara.Get(NpcUid);
+        if (c == null || c.isDead || !c.ExistsOnMap || !EClass.pc.ExistsOnMap)
+        {
+            return false;
+        }
+
+        return c.pos != null && EClass.pc.pos != null && c.pos.Equals(EClass.pc.pos);
     }
 
     /// <summary>True when the assistant has been walking too long and the craft should stop waiting.</summary>
@@ -201,23 +210,11 @@ internal static class CoCraftSession
             return false;
         }
 
-        Point dest = EClass.pc.pos;
+        // Move straight into the PC's cell — the target cell always exists and
+        // Elin allows sharing a tile, so this cannot be blocked by furniture.
         try
         {
-            Point? near = dest.GetNearestPoint(allowBlock: false, allowChara: true, allowInstalled: true, ignoreCenter: false);
-            if (near != null && near.IsValid)
-            {
-                dest = near;
-            }
-        }
-        catch
-        {
-            // keep pc.pos
-        }
-
-        try
-        {
-            assistant.MoveImmediate(dest, focus: false, cancelAI: false);
+            assistant.MoveImmediate(EClass.pc.pos, focus: false, cancelAI: false);
             return true;
         }
         catch (System.Exception ex)
