@@ -153,15 +153,12 @@ internal class AI_NpcProcess : AIAct
             }
 
             // Validate source stacks still usable.
-            for (int i = 0; i < sources.Count; i++)
+            if (!ProcessorJobSession.CanUseIngredientStacks())
             {
-                Thing? s = sources[i];
-                if (s == null || s.isDestroyed || s.Num <= 0)
-                {
-                    ProcessorJobSession.Clear("no-ings");
-                    yield return Cancel();
-                    yield break;
-                }
+                ProcessorJobSession.Clear(
+                    ProcessorJobSession.IsAnyIngredientHeldByPc() ? "pc-pick" : "no-ings");
+                yield return Cancel();
+                yield break;
             }
 
             List<Thing> targets = new List<Thing>(sources);
@@ -261,6 +258,12 @@ internal class AI_NpcProcess : AIAct
                     }
 
                     if (machine == null || machine.isDestroyed)
+                    {
+                        return false;
+                    }
+
+                    // Check if player has picked up any ingredients from the machine.
+                    if (!ProcessorJobSession.CanUseIngredientStacks())
                     {
                         return false;
                     }
@@ -805,6 +808,13 @@ int exp = 0;
             return false;
         }
 
+        if (!ProcessorJobSession.CanUseIngredientStacks())
+        {
+            ProcessorJobSession.Clear(
+                ProcessorJobSession.IsAnyIngredientHeldByPc() ? "pc-pick" : "no-ings");
+            return false;
+        }
+
         // Catch-up must use live map stacks only. Ghost refs after unload would Split
         // in memory and leave the real parked bulk untouched (= free product / dupe).
         int[] numsBefore = new int[sources.Count];
@@ -960,6 +970,18 @@ int exp = 0;
             if (t == null || t.isDestroyed)
             {
                 continue;
+            }
+
+            try
+            {
+                Card? root = t.GetRootCard();
+                if (root != null && root.IsPC)
+                {
+                    continue;
+                }
+            }
+            catch
+            {
             }
 
             bool parked = false;

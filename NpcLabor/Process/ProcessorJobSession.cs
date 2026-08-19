@@ -39,6 +39,8 @@ internal static class ProcessorJobSession
     internal static string? NpcName;
     internal static string? MachineName;
     internal static string LastClearReason = "";
+    /// <summary>True while Clear/refund is moving ingredients back into the PC's inventory.</summary>
+    internal static bool IsReturningIngredients;
     /// <summary>Party companions leave party for the job so AI is free, then rejoin on Clear. Flag order matches town labor / vanilla auto-rejoin.</summary>
     internal static bool WasPartyMember;
     /// <summary>Last observed live craft duration (after NPC half-cut). Used for return catch-up.</summary>
@@ -446,6 +448,77 @@ internal static class ProcessorJobSession
         return false;
     }
 
+    /// <summary>True when the claimed ingredient stacks are still usable and sitting on a map cell, not inside the PC.</summary>
+    internal static bool CanUseIngredientStacks()
+    {
+        if (Ingredients.Count == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < Ingredients.Count; i++)
+        {
+            Thing? t = Ingredients[i];
+            if (t == null || t.isDestroyed || t.Num <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!t.ExistsOnMap)
+                {
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>True when any claimed ingredient stack has been picked up by the PC or otherwise moved off-map.</summary>
+    internal static bool IsAnyIngredientHeldByPc()
+    {
+        for (int i = 0; i < Ingredients.Count; i++)
+        {
+            Thing? t = Ingredients[i];
+            if (t == null || t.isDestroyed || t.Num <= 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                Card? root = t.GetRootCard();
+                if (root != null && root.IsPC)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (!t.ExistsOnMap)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Leftover parked stacks after Remaining hits 0 are refunded on Clear.
     /// Never refill Remaining from leftover Num — that duplicated last-unit crafts.
@@ -763,22 +836,35 @@ internal static class ProcessorJobSession
             return;
         }
 
-        for (int i = 0; i < Ingredients.Count; i++)
+        if (IsReturningIngredients)
         {
-            Thing? t = Ingredients[i];
-            if (t == null || t.isDestroyed || t.Num <= 0)
-            {
-                continue;
-            }
+            return;
+        }
 
-            try
+        IsReturningIngredients = true;
+        try
+        {
+            for (int i = 0; i < Ingredients.Count; i++)
             {
-                ReturnOneIngredientToPc(t);
+                Thing? t = Ingredients[i];
+                if (t == null || t.isDestroyed || t.Num <= 0)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    ReturnOneIngredientToPc(t);
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogDebug("return ingredient failed: " + ex.Message);
+                }
             }
-            catch (System.Exception ex)
-            {
-                Plugin.LogDebug("return ingredient failed: " + ex.Message);
-            }
+        }
+        finally
+        {
+            IsReturningIngredients = false;
         }
     }
 
@@ -1497,6 +1583,9 @@ internal static class ProcessorJobSession
                 break;
             case "stamina":
                 Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.exhausted", name));
+                break;
+            case "pc-pick":
+                Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.stopped", name, NpcLabor.LaborTerms.Process));
                 break;
             default:
                 Msg.SayRaw(NpcLabor.LaborText.T("proc.msg.ended", name, NpcLabor.LaborTerms.Process));
