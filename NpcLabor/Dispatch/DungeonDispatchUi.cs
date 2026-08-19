@@ -598,15 +598,13 @@ internal static class DungeonDispatchUi
                         return "#" + id;
                     }
 
-                    string tag = IsPartyMember(c) ? (NpcLabor.LaborText.T("dis.ui.partyTag") + " ") : "";
                     string n = c.NameSimple ?? c.Name ?? ("#" + id);
-                    if (n.Length > 10)
-                    {
-                        n = n.Substring(0, 10);
-                    }
-
                     string mark = PendingSelection.Contains(id) ? "✓ " : "";
-                    return mark + tag + n;
+                    return mark + PersonPickerUi.HobbyTaggedLabel(
+                        c,
+                        DungeonDispatchTargets.RelevantSkillIds(),
+                        NpcLabor.LaborText.T("dis.ui.partyTag"),
+                        n);
                 },
                 (id, item) =>
                 {
@@ -721,10 +719,13 @@ internal static class DungeonDispatchUi
                     }
                     else
                     {
-                        string tag = IsPartyMember(c) ? (NpcLabor.LaborText.T("dis.ui.partyTag") + " ") : "";
                         string n = c.NameSimple ?? c.Name ?? ("#" + id);
                         string mark = PendingSelection.Contains(id) ? "✓ " : "";
-                        label = mark + tag + n;
+                        label = mark + PersonPickerUi.HobbyTaggedLabel(
+                            c,
+                            DungeonDispatchTargets.RelevantSkillIds(),
+                            NpcLabor.LaborText.T("dis.ui.partyTag"),
+                            n);
                         sub = DungeonDispatchTargets.MemberSkillLine(c, target);
                     }
 
@@ -922,18 +923,6 @@ internal static class DungeonDispatchUi
         }
         catch
         {
-        }
-    }
-
-    static bool IsPartyMember(Chara c)
-    {
-        try
-        {
-            return c.IsPCParty || (EClass.pc?.party?.members?.Contains(c) ?? false);
-        }
-        catch
-        {
-            return false;
         }
     }
 

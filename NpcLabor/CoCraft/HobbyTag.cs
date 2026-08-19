@@ -29,6 +29,21 @@ internal static class HobbyTag
             return HobbyWorkKind.None;
         }
 
+        return GetRelevantKind(c, new int[] { skillId });
+    }
+
+    /// <summary>
+    /// Hobby when a hobby matches any of the skills, Work when only an assigned
+    /// work matches, else None. Used by pickers with several relevant skills
+    /// (dispatch), where the single-skill overload is not enough.
+    /// </summary>
+    internal static HobbyWorkKind GetRelevantKind(Chara? c, IReadOnlyCollection<int> skillIds)
+    {
+        if (c == null || skillIds == null || skillIds.Count == 0)
+        {
+            return HobbyWorkKind.None;
+        }
+
         try
         {
             // Vanilla lazy-init: both lists are rolled together.
@@ -37,18 +52,30 @@ internal static class HobbyTag
                 c.RerollHobby();
             }
 
-            if (Scan(c._hobbies, skillId))
+            bool anyWork = false;
+            foreach (int skillId in skillIds)
             {
-                return HobbyWorkKind.Hobby;
+                if (skillId <= 0)
+                {
+                    continue;
+                }
+
+                if (Scan(c._hobbies, skillId))
+                {
+                    return HobbyWorkKind.Hobby;
+                }
+
+                if (Scan(c._works, skillId))
+                {
+                    anyWork = true;
+                }
             }
 
-            if (Scan(c._works, skillId))
-            {
-                return HobbyWorkKind.Work;
-            }
+            return anyWork ? HobbyWorkKind.Work : HobbyWorkKind.None;
         }
         catch (System.Exception __e) { Plugin.LogDebug("HobbyTag.cs silent catch: " + __e.Message); }
-return HobbyWorkKind.None;
+
+        return HobbyWorkKind.None;
     }
 
     static bool Scan(List<int>? ids, int skillId)

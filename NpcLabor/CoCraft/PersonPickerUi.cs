@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -366,5 +367,50 @@ try
         }
         catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
 return false;
+    }
+
+    /// <summary>
+    /// Co-craft/processor-style hobby/work designator for picker rows:
+    /// 爱好·队伍 艾琳 when a hobby matches, 工作·队伍 艾琳 when only an assigned
+    /// work matches, else plain 队伍 艾琳. Truncates the name harder when tagged
+    /// so the prefix fits on the row. partyTag is an already-localized label
+    /// (队伍 / Party / 隊列) appended only for party members.
+    /// </summary>
+    internal static string HobbyTaggedLabel(
+        Chara c,
+        IReadOnlyCollection<int> skillIds,
+        string partyTag,
+        string name)
+    {
+        HobbyWorkKind kind = HobbyTag.GetRelevantKind(c, skillIds);
+
+        int maxName = kind == HobbyWorkKind.None ? 8 : 5;
+        if (name.Length > maxName)
+        {
+            name = name.Substring(0, maxName);
+        }
+
+        string tag = "";
+        if (!string.IsNullOrEmpty(partyTag))
+        {
+            try
+            {
+                if (c.IsPCParty || (EClass.pc?.party?.members?.Contains(c) ?? false))
+                {
+                    tag = partyTag + " ";
+                }
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
+        }
+
+        if (kind == HobbyWorkKind.None)
+        {
+            return tag + name;
+        }
+
+        string prefix = kind == HobbyWorkKind.Hobby
+            ? NpcLabor.LaborText.T("co.prefix.hobby")
+            : NpcLabor.LaborText.T("co.prefix.work");
+        return prefix + "·" + tag + name;
     }
 }

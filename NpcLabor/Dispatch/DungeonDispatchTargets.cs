@@ -645,6 +645,41 @@ internal static class DungeonDispatchTargets
         return MemberSkillLine(worker, target?.Zone);
     }
 
+    /// <summary>
+    /// Skill ids the dispatch system actually values, for the hobby/work picker
+    /// tag (爱好/工作): combat weapons + tactics/marksman/casting, explore,
+    /// lockpick, and the gather family. A hobby/work matching any of these marks
+    /// the person as a natural fit at a glance.
+    /// </summary>
+    internal static IReadOnlyCollection<int> RelevantSkillIds()
+    {
+        return new List<int>
+        {
+            DungeonDispatchMission.SkillExplore,
+            DungeonDispatchMission.SkillLockpick,
+            DungeonDispatchMission.SkillGather,
+            DungeonDispatchMission.SkillMining,
+            DungeonDispatchMission.SkillLumber,
+            DungeonDispatchMission.SkillDigging,
+            DungeonDispatchMission.SkillFishing,
+            DungeonDispatchMission.SkillMartial,
+            DungeonDispatchMission.SkillTactics,
+            DungeonDispatchMission.SkillMarksman,
+            DungeonDispatchMission.SkillCasting,
+            DungeonDispatchMission.SkillWeaponSword,
+            DungeonDispatchMission.SkillWeaponAxe,
+            DungeonDispatchMission.SkillWeaponStaff,
+            DungeonDispatchMission.SkillWeaponBow,
+            DungeonDispatchMission.SkillWeaponGun,
+            DungeonDispatchMission.SkillWeaponPolearm,
+            DungeonDispatchMission.SkillWeaponDagger,
+            DungeonDispatchMission.SkillThrowing,
+            DungeonDispatchMission.SkillWeaponCrossbow,
+            DungeonDispatchMission.SkillWeaponScythe,
+            DungeonDispatchMission.SkillWeaponBlunt,
+        };
+    }
+
     internal static int GetRelevantGatherSkill(Chara worker, Zone? zone)
     {
         int gather = SafeSkill(worker, DungeonDispatchMission.SkillGather);

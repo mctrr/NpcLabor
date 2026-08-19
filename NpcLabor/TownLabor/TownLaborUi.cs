@@ -300,9 +300,12 @@ internal static class TownLaborUi
                         return "#" + id;
                     }
 
-                    string tag = IsParty(c) ? (NpcLabor.LaborText.T("town.ui.partyTag") + " ") : "";
                     string n = c.NameSimple ?? c.Name ?? ("#" + id);
-                    return tag + n;
+                    return PersonPickerUi.HobbyTaggedLabel(
+                        c,
+                        JobSkillIds(def),
+                        NpcLabor.LaborText.T("town.ui.partyTag"),
+                        n);
                 },
                 (id, item) =>
                 {
@@ -327,9 +330,12 @@ internal static class TownLaborUi
                     }
                     else
                     {
-                        string tag = IsParty(c) ? (NpcLabor.LaborText.T("town.ui.partyTag") + " ") : "";
                         string n = c.NameSimple ?? c.Name ?? ("#" + id);
-                        label = tag + n;
+                        label = PersonPickerUi.HobbyTaggedLabel(
+                            c,
+                            JobSkillIds(def),
+                            NpcLabor.LaborText.T("town.ui.partyTag"),
+                            n);
                         int sk = 0;
                         try
                         {
@@ -576,9 +582,12 @@ internal static class TownLaborUi
                 {
                     Chara? c = TownLaborManager.ResolveChara(id);
                     if (c == null) return "#" + id;
-                    string tag = IsParty(c) ? (LaborText.T("town.ui.partyTag") + " ") : "";
                     string n = c.NameSimple ?? c.Name ?? ("#" + id);
-                    return tag + n;
+                    return PersonPickerUi.HobbyTaggedLabel(
+                        c,
+                        JobSkillIds(def),
+                        LaborText.T("town.ui.partyTag"),
+                        n);
                 },
                 (id, item) =>
                 {
@@ -615,9 +624,12 @@ internal static class TownLaborUi
                     }
                     else
                     {
-                        string tag = IsParty(c) ? (LaborText.T("town.ui.partyTag") + " ") : "";
                         string n = c.NameSimple ?? c.Name ?? ("#" + id);
-                        label = tag + n;
+                        label = PersonPickerUi.HobbyTaggedLabel(
+                            c,
+                            JobSkillIds(def),
+                            LaborText.T("town.ui.partyTag"),
+                            n);
                         int sk = 0;
                         try
                         {
@@ -651,16 +663,15 @@ internal static class TownLaborUi
         }
     }
 
-    static bool IsParty(Chara c)
+    /// <summary>Job skill ids for the hobby/work picker tag (one skill per job).</summary>
+    static IReadOnlyCollection<int> JobSkillIds(TownLaborJobDef? def)
     {
-        try
+        if (def != null && def.SkillId > 0)
         {
-            return c.IsPCParty || (EClass.pc?.party?.members?.Contains(c) ?? false);
+            return new[] { def.SkillId };
         }
-        catch
-        {
-            return false;
-        }
+
+        return Array.Empty<int>();
     }
 
     /// <summary>
