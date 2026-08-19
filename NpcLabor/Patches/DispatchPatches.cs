@@ -386,20 +386,31 @@ try
 }
 
 // Zone enter: keep dispatched NPCs on the progress floor as friendly stakeouts.
-[HarmonyPatch(typeof(Player), nameof(Player.MoveZone), typeof(Zone))]
+// Hook Zone.Activate (runs on every real zone entry: EnterLocalZone from the world
+// map, LayerTravel, recall, load). Player.MoveZone(Zone) is NOT hit by those paths -
+// the normal enter flow goes through Chara.MoveZone(Zone, ZoneTransition) - so region
+// dispatch members were never pulled to the player field on arrival.
+[HarmonyPatch(typeof(Zone), nameof(Zone.Activate))]
 internal static class DispatchZoneEnterPatch
 {
     [HarmonyPostfix]
-    static void Postfix(Zone __0)
+    static void Postfix(Zone __instance)
     {
         try
         {
-            if (__0 != null)
+            if (__instance == null)
             {
-                DungeonDispatchManager.OnZoneEntered(__0);
-                TownLaborManager.OnZoneEntered(__0);
-                ProcessorJobSession.OnZoneEntered(__0);
+                return;
             }
+
+            if (EClass.player != null && EClass.player.simulatingZone)
+            {
+                return;
+            }
+
+            DungeonDispatchManager.OnZoneEntered(__instance);
+            TownLaborManager.OnZoneEntered(__instance);
+            ProcessorJobSession.OnZoneEntered(__instance);
         }
         catch (Exception ex)
         {

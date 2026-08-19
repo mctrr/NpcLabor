@@ -1249,8 +1249,20 @@ if (c == null || c.isDead)
                                     }
                                 }
                                 catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+                            }
                         }
+
+                        // Keep the stakeout field alive for the whole mission
+                        // (vanilla field default expiry is 7 days; Region.OnActivate
+                        // would otherwise reap it and leave the player an empty field).
+                        try
+                        {
+                            if (field != null)
+                            {
+                                field.dateExpire = 0;
+                            }
+                        }
+                        catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
 
                         foreach (Chara c in alive)
                         {
@@ -1623,6 +1635,13 @@ Plugin.LogInfo("dispatch settle kind=" + kind + " mission=" + m.missionId + " zo
                     {
                         m.zoneId = zone.id;
                     }
+                }
+                catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
+
+                // This is the live stakeout field: keep it non-destructible for the mission.
+                try
+                {
+                    zone.dateExpire = 0;
                 }
                 catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
 m.currentFloorLv = 0;

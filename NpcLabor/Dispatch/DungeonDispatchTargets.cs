@@ -1909,6 +1909,16 @@ internal static class DungeonDispatchTargets
                 {
                 }
 
+                // dateExpire==0 => Zone.CanDestroy() returns false, so Region.OnActivate
+                // never reaps this stakeout field mid-mission (default field expiry is 7 days).
+                try
+                {
+                    created.dateExpire = 0;
+                }
+                catch
+                {
+                }
+
                 Plugin.LogInfo("dispatch region field created uid=" + created.uid
                     + " @" + gx + "," + gy);
                 return created;
@@ -1929,6 +1939,14 @@ internal static class DungeonDispatchTargets
                 try
                 {
                     region.elomap?.SetZone(gx, gy, z);
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    z.dateExpire = 0;
                 }
                 catch
                 {
