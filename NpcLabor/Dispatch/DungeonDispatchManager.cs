@@ -1375,10 +1375,10 @@ if (m.hoursLeft <= 0)
             }
         }
 
-        // Keep lastSeenWorldRaw fresh even if the player has not Game.Save'd yet.
+        // Hour ticks can burst (sleep/wait). Mark dirty and flush once after AdvanceHour.
         if (Missions.Count > 0)
         {
-            try { Save(); } catch { }
+            _hourSavePending = true;
         }
     }
 
@@ -1566,6 +1566,7 @@ try
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
 Plugin.LogInfo("dispatch settle kind=" + kind + " mission=" + m.missionId + " zone=" + m.uidZone
             + " loot=" + loot);
+        try { Save(); } catch { }
     }
 
     internal static void OnWorkerDied(Chara c)
@@ -1789,8 +1790,27 @@ PrepareDispatchedChara(c);
         }
     }
 
+    static bool _hourSavePending;
+
+    internal static bool HasPendingHourSave => _hourSavePending;
+
+    internal static void FlushPendingHourSave()
+    {
+        if (!_hourSavePending)
+        {
+            return;
+        }
+
+        _hourSavePending = false;
+        if (Missions.Count > 0)
+        {
+            Save();
+        }
+    }
+
     internal static void Save()
     {
+        _hourSavePending = false;
         try
         {
             string? path = SavePath();

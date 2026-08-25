@@ -13,26 +13,11 @@ namespace NpcLabor.Patches;
 [HarmonyPatch(typeof(GameDate), nameof(GameDate.AdvanceHour))]
 internal static class DispatchGameDateHourPatch
 {
-    // Prefix: scrub null EloMap lights BEFORE vanilla Scene.OnChangeHour runs inside AdvanceHour.
-    // Broken lights come from older builds that called AddLight(..., "iconFlag").
-    [HarmonyPrefix]
-    static void Prefix()
-    {
-        try
-        {
-            DungeonDispatchManager.SanitizeRegionMapLights();
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs silent catch: " + __e.Message); }
-}
-
     [HarmonyPostfix]
     static void Postfix()
     {
         try
         {
-            // Always sanitize; cheap and keeps overworld hour ticks safe even with 0 missions.
-            DungeonDispatchManager.SanitizeRegionMapLights();
-
             if (DungeonDispatchManager.Count > 0)
             {
                 DungeonDispatchManager.OnSimulateHour();
@@ -55,6 +40,54 @@ internal static class DispatchGameDateHourPatch
             Plugin.LogWarn("townlabor gamedate hour: " + ex.Message);
         }
 
+        // Sleep/wait loops AdvanceHour inside AdvanceMin. Write once after that loop
+        // so lastSeenWorldRaw matches the final hour, not each hop.
+        if (!_deferHourSave)
+        {
+            FlushHourSaves();
+        }
+    }
+
+    static bool _deferHourSave;
+
+    internal static void BeginHourBurst()
+    {
+        _deferHourSave = true;
+    }
+
+    internal static void EndHourBurst()
+    {
+        _deferHourSave = false;
+        FlushHourSaves();
+    }
+
+    static void FlushHourSaves()
+    {
+        if (!DungeonDispatchManager.HasPendingHourSave && !TownLaborManager.HasPendingHourSave)
+        {
+            return;
+        }
+
+        try { DungeonDispatchManager.FlushPendingHourSave(); }
+        catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs dispatch hour-save: " + __e.Message); }
+        try { TownLaborManager.FlushPendingHourSave(); }
+        catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs town hour-save: " + __e.Message); }
+    }
+}
+
+[HarmonyPatch(typeof(GameDate), nameof(GameDate.AdvanceMin))]
+internal static class DispatchGameDateMinFlushPatch
+{
+    [HarmonyPrefix]
+    static void Prefix()
+    {
+        DispatchGameDateHourPatch.BeginHourBurst();
+    }
+
+    [HarmonyFinalizer]
+    static void Finalizer()
+    {
+        DispatchGameDateHourPatch.EndHourBurst();
     }
 }
 // Final safety net: vanilla EloMapActor.OnChangeHour does light.sr.color with no null check.

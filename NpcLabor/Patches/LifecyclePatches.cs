@@ -1,4 +1,5 @@
 using HarmonyLib;
+using System.Collections.Generic;
 using NpcLabor.CoCraft;
 using NpcLabor.Dispatch;
 using NpcLabor.TownLabor;
@@ -20,6 +21,65 @@ internal static class AiUseCrafterPatches
         catch (System.Exception ex)
         {
             Plugin.LogWarn($"co-craft OnStart failed: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// Hold this one AI_UseCrafter enumerator until the assistant arrives.
+    /// Do not patch AIAct.Tick — that is every character every turn.
+    /// AIAct.Start sets Enumerator = Run() then calls OnStart, so wrapping here
+    /// is equivalent to the old Tick skip without a global detour.
+    /// </summary>
+    [HarmonyPostfix]
+    [HarmonyPatch(nameof(AI_UseCrafter.OnStart))]
+    static void OnStartPostfix(AI_UseCrafter __instance)
+    {
+        try
+        {
+            if (!CoCraftSession.Active || __instance == null || EClass.pc == null
+                || __instance.owner != EClass.pc)
+            {
+                return;
+            }
+
+            if (CoCraftSession.IsAssistantReady() || CoCraftSession.ApproachExpired())
+            {
+                return;
+            }
+
+            IEnumerator<AIAct.Status>? inner = __instance.Enumerator;
+            __instance.Enumerator = WaitForAssistantThen(inner).GetEnumerator();
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("co-craft wait wrap: " + ex.Message);
+        }
+    }
+
+    static IEnumerable<AIAct.Status> WaitForAssistantThen(IEnumerator<AIAct.Status>? inner)
+    {
+        try
+        {
+            while (CoCraftSession.Active
+                && !CoCraftSession.IsAssistantReady()
+                && !CoCraftSession.ApproachExpired())
+            {
+                yield return AIAct.Status.Running;
+            }
+
+            if (inner == null)
+            {
+                yield break;
+            }
+
+            while (inner.MoveNext())
+            {
+                yield return inner.Current;
+            }
+        }
+        finally
+        {
+            try { inner?.Dispose(); } catch { }
         }
     }
 
@@ -348,42 +408,4 @@ internal static class TownLaborLeaveConfirmPatch
     }
 }
 
-/// <summary>
-/// Co-craft: hold the PC's AI_UseCrafter tick while the assistant walks over, so the
-/// craft does not start (and cannot be cancelled by a canProgress gate) until the
-/// assistant is beside the PC. AIAct.Tick drives AI_UseCrafter.Run; skipping it for
-/// a few ticks just stalls the craft. The approach timeout guarantees the craft can
-/// never wait forever.
-/// </summary>
-[HarmonyPatch(typeof(AIAct))]
-internal static class CoCraftAiTickHoldPatch
-{
-    [HarmonyPrefix]
-    [HarmonyPatch(nameof(AIAct.Tick))]
-    static bool Prefix(AIAct __instance)
-    {
-        try
-        {
-            if (!CoCraftSession.Active || EClass.pc == null
-                || __instance is not AI_UseCrafter
-                || __instance.owner != EClass.pc)
-            {
-                return true;
-            }
-
-            // Hold the craft until the assistant arrives; the timeout keeps the
-            // wait bounded even if the NPC cannot reach the PC.
-            if (!CoCraftSession.IsAssistantReady() && !CoCraftSession.ApproachExpired())
-            {
-                return false;
-            }
-        }
-        catch (System.Exception ex)
-        {
-            Plugin.LogDebug("co-craft AI tick hold: " + ex.Message);
-        }
-
-        return true;
-    }
-}
 
