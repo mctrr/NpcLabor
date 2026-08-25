@@ -781,21 +781,28 @@ return "name:" + (target.Name ?? "");
                 hours = baseHours;
             }
 
+            if (target.RegionGx == int.MinValue || target.RegionGy == int.MinValue)
+            {
+                return NpcLabor.LaborText.T("dis.error.regionTile");
+            }
+
             Zone? field = DungeonDispatchTargets.EnsureRegionFieldZone(target.RegionGx, target.RegionGy);
+            if (field == null || !DungeonDispatchTargets.IsReusableFieldZone(field))
+            {
+                return NpcLabor.LaborText.T("dis.error.regionTile");
+            }
+
             int fieldUid = 0;
             string fieldId = "region:" + DungeonDispatchTargets.NormalizeRegionKind(target.RegionKind);
-            if (field != null)
+            try { fieldUid = field.uid; } catch { fieldUid = 0; }
+            try
             {
-                try { fieldUid = field.uid; } catch { fieldUid = 0; }
-                try
+                if (!string.IsNullOrEmpty(field.id))
                 {
-                    if (!string.IsNullOrEmpty(field.id))
-                    {
-                        fieldId = field.id;
-                    }
+                    fieldId = field.id;
                 }
-                catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
 
             var mission = new DungeonDispatchMission
             {

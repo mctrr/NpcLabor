@@ -1222,6 +1222,11 @@ internal static class DungeonDispatchTargets
             foreach (string kind in kinds)
             {
                 DungeonDispatchTarget t = BuildRegionTarget(home, kind);
+                if (t.RegionGx == int.MinValue || t.RegionGy == int.MinValue)
+                {
+                    continue;
+                }
+
                 result.Add(t);
             }
         }
@@ -1238,8 +1243,8 @@ internal static class DungeonDispatchTargets
         string name = RegionDisplayName(kind);
         int dist = 1;
         string compass = NpcLabor.LaborText.T("dis.compass.near");
-        int gx = home.x;
-        int gy = home.y;
+        int gx = int.MinValue;
+        int gy = int.MinValue;
         bool found = false;
 
         try
@@ -1433,12 +1438,16 @@ internal static class DungeonDispatchTargets
         try
         {
             EloMap.TileInfo? info = map.GetTileInfo(gx, gy);
-            if (info == null || !MatchRegionTile(info, kind))
+            if (info == null || !MatchRegionTile(info, kind) || !IsFreeRegionTile(map, home, gx, gy))
             {
                 return false;
             }
 
             int d = Math.Max(Math.Abs(gx - home.x), Math.Abs(gy - home.y));
+            if (d <= 0)
+            {
+                return false;
+            }
             if (d < best)
             {
                 best = d;
@@ -1472,41 +1481,170 @@ internal static class DungeonDispatchTargets
             biome = "";
         }
 
-        if (string.IsNullOrEmpty(biome))
-        {
-            biome = "Plain";
-        }
+        string alias = "";
+        try { alias = info.source?.alias ?? ""; } catch { alias = ""; }
+        string tileName = "";
+        try { tileName = info.source?.name ?? ""; } catch { tileName = ""; }
+        int tileId = 0;
+        try { tileId = info.source?.id ?? 0; } catch { tileId = 0; }
+        string profile = "";
+        try { profile = info.idZoneProfile ?? ""; } catch { profile = ""; }
 
         string b = biome;
         bool rock = false;
         bool shore = false;
         bool sea = false;
         bool snow = false;
+        bool blocked = false;
+        bool canEmbark = false;
         try { rock = info.rock; } catch { }
         try { shore = info.shore; } catch { }
         try { sea = info.sea; } catch { }
         try { snow = info.IsSnow; } catch { }
+        try { blocked = info.blocked; } catch { }
+        try { canEmbark = info.CanEmbark && !blocked; } catch { canEmbark = !string.IsNullOrEmpty(profile) && !blocked; }
+
+        if (!canEmbark || blocked)
+        {
+            return false;
+        }
 
         switch (NormalizeRegionKind(kind))
         {
             case "plain":
-                return !rock && !sea && !shore
+                return !rock && !sea && !shore && !snow
                     && (b.Equals("Plain", StringComparison.OrdinalIgnoreCase)
                         || b.Equals("Default", StringComparison.OrdinalIgnoreCase)
-                        || b.Equals("Mud", StringComparison.OrdinalIgnoreCase));
+                        || b.Equals("Mud", StringComparison.OrdinalIgnoreCase)
+                        || alias.Equals("plain", StringComparison.OrdinalIgnoreCase)
+                        || tileId == 1);
             case "forest":
-                return b.Equals("Forest", StringComparison.OrdinalIgnoreCase);
+                return b.Equals("Forest", StringComparison.OrdinalIgnoreCase)
+                    || alias.Equals("forest", StringComparison.OrdinalIgnoreCase)
+                    || tileId == 3 || tileId == 13;
             case "beach":
                 return shore
                     || b.Equals("Sand", StringComparison.OrdinalIgnoreCase)
+                    || alias.Equals("beach", StringComparison.OrdinalIgnoreCase)
+                    || tileId == 14
                     || (b.Equals("Water", StringComparison.OrdinalIgnoreCase) && !sea);
             case "mountain":
-                return rock
-                    || b.Equals("Barren", StringComparison.OrdinalIgnoreCase)
-                    || (snow && !b.Equals("Water", StringComparison.OrdinalIgnoreCase));
+                // Yellow enterable mountain only. Grey "rock"/"wall" mountains are blocked.
+                if (rock || sea || shore || tileId == 6)
+                {
+                    return false;
+                }
+
+                if (tileId == 5
+                    || alias.Equals("mountain", StringComparison.OrdinalIgnoreCase)
+                    || tileName.Equals("Mountain", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (!string.IsNullOrEmpty(profile)
+                    && (profile.IndexOf("Mountain", StringComparison.OrdinalIgnoreCase) >= 0
+                        || profile.IndexOf("Hill", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    return true;
+                }
+
+                return b.Equals("Barren", StringComparison.OrdinalIgnoreCase) && !snow;
             default:
                 return false;
         }
+    }
+
+    internal static bool IsFreeRegionTile(EloMap map, Zone? home, int gx, int gy)
+    {
+        if (home != null)
+        {
+            try
+            {
+                if (gx == home.x && gy == home.y)
+                {
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        Zone? existing = null;
+        try
+        {
+            existing = map?.GetZone(gx, gy);
+        }
+        catch
+        {
+            existing = null;
+        }
+
+        if (existing == null)
+        {
+            try
+            {
+                if (EClass.game?.spatials?.Zones != null)
+                {
+                    foreach (Zone z in EClass.game.spatials.Zones)
+                    {
+                        if (z == null || z.destryoed)
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            if (z.x == gx && z.y == gy)
+                            {
+                                existing = z;
+                                break;
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (existing == null)
+        {
+            return true;
+        }
+
+        return IsReusableFieldZone(existing);
+    }
+
+    internal static bool IsReusableFieldZone(Zone? zone)
+    {
+        if (zone == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (zone.destryoed || zone is Region || zone is Zone_Tent || zone.IsPCFaction)
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        string id = "";
+        try { id = zone.id ?? ""; } catch { id = ""; }
+        return string.Equals(id, "field", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("region:", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string RegionInfoLine(DungeonDispatchTarget t, int exploreWeeks = 1)
@@ -1855,7 +1993,7 @@ internal static class DungeonDispatchTargets
                     existing = null;
                 }
 
-                if (existing != null && !existing.destryoed && existing is not Region)
+                if (IsReusableFieldZone(existing))
                 {
                     return existing;
                 }
@@ -1880,7 +2018,7 @@ internal static class DungeonDispatchTargets
 
                     try
                     {
-                        if (z.x == gx && z.y == gy)
+                        if (z.x == gx && z.y == gy && IsReusableFieldZone(z))
                         {
                             return z;
                         }

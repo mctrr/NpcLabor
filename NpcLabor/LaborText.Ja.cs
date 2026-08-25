@@ -127,6 +127,7 @@ internal static partial class LaborText
         ["dis.error.regionBusy"] = "そこではすでに{0}が進行中だ",
         ["dis.error.dungeonBusy"] = "そこではすでに{0}が進行中だ",
         ["dis.error.needBase"] = "拠点が必要だ",
+        ["dis.error.regionTile"] = "近くに入れる該当タイルがない",
         ["dis.error.dungeonNo"] = "このダンジョンは{0}できない",
         ["dis.start.region"] = "{0}が出発した：{1} {2}（{3}人 · 探索{4}週）",
         ["dis.start.dungeon"] = "{0}が出発した：{1} {2}（{3}人 · 約{4}日）",
