@@ -576,6 +576,11 @@ list.Sort((a, b) =>
             return false;
         }
 
+        if (PersonPickerUi.IsStayHomeUnique(c))
+        {
+            return false;
+        }
+
         if (LaborBusy.IsBusy(c.uid))
         {
             return false;

@@ -35,6 +35,11 @@ internal static class AssistantResolver
             return false;
         }
 
+        if (PersonPickerUi.IsStayHomeUnique(c))
+        {
+            return false;
+        }
+
         if (!c.IsAliveInCurrentZone)
         {
             return false;

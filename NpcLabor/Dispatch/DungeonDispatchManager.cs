@@ -298,6 +298,11 @@ list.Sort((a, b) =>
                 return false;
             }
 
+            if (CoCraft.PersonPickerUi.IsStayHomeUnique(c))
+            {
+                return false;
+            }
+
             // Shared busy across A/B/D/E.
             if (LaborBusy.IsBusy(c.uid) || IsBusy(c.uid))
             {

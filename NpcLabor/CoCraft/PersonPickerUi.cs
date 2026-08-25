@@ -366,7 +366,30 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
-return false;
+        return false;
+    }
+
+    /// <summary>
+    /// Unique residents who cannot join the party (Demitas etc.) stay off
+    /// co-craft, processor, town labor, and dispatch pickers.
+    /// </summary>
+    internal static bool IsStayHomeUnique(Chara? c)
+    {
+        if (c == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (c.trait is TraitChara tc && tc.IsUnique && !tc.CanJoinParty)
+            {
+                return true;
+            }
+        }
+        catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
+
+        return false;
     }
 
     /// <summary>
