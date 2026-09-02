@@ -200,6 +200,26 @@ internal static class CoCraftSession
         => Time.frameCount - _approachStartFrame > ApproachTimeoutFrames;
 
     /// <summary>
+    /// Snap the current session assistant into the PC cell if they are not already there.
+    /// Used by the PC wait wrapper when the approach timeout elapses.
+    /// </summary>
+    internal static bool SnapCurrentAssistant()
+    {
+        if (!Active || NpcUid == 0)
+        {
+            return false;
+        }
+
+        Chara? c = RefChara.Get(NpcUid);
+        if (c == null || c.isDead)
+        {
+            return false;
+        }
+
+        return SnapAssistantToPc(c);
+    }
+
+    /// <summary>
     /// Last-resort fallback when the assistant cannot walk over (blocked path / timeout):
     /// move them beside the PC without cancelling the running approach AI.
     /// </summary>

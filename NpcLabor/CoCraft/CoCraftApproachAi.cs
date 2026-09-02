@@ -8,11 +8,16 @@ namespace NpcLabor.CoCraft;
 /// in place beside them for the whole craft. If the path is blocked or they cannot
 /// arrive in time, SnapAssistantToPc is used as a last-resort fallback. Replaced
 /// with NoGoal on Clear; a player command replaces it too and OnCancel frees movement.
+///
+/// Walk is ticked as a local AI_Goto, not SetChild. Vanilla AIAct.Tick only advances
+/// a running child, which would freeze this enumerator and skip the stuck/timeout snap.
 /// </summary>
 internal class CoCraftApproachAi : AIAct
 {
     /// <summary>Frames without closing distance (~4s at 60fps) before snapping beside the PC.</summary>
     const int StuckFrames = 240;
+
+    AI_Goto? _walk;
 
     public override bool CancelWhenDamaged => false;
 
@@ -20,6 +25,7 @@ internal class CoCraftApproachAi : AIAct
 
     public override void OnCancel()
     {
+        StopWalk();
         // Player command or Clear replaced us — stop pinning the NPC in place.
         try
         {
@@ -29,13 +35,23 @@ internal class CoCraftApproachAi : AIAct
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("CoCraftApproachAi.cs silent catch: " + __e.Message); }
-}
+    }
+
+    public override void OnReset()
+    {
+        StopWalk();
+    }
+
+    void StopWalk()
+    {
+        try { _walk?.Reset(); } catch { }
+        _walk = null;
+    }
 
     public override IEnumerable<Status> Run()
     {
         int lastDist = 99;
         int lastProgressFrame = Time.frameCount;
-        bool haveChild = false;
         while (CoCraftSession.Active && !CoCraftSession.ApproachExpired())
         {
             Chara? pc = EClass.pc;
@@ -63,20 +79,23 @@ internal class CoCraftApproachAi : AIAct
             // Walk into the PC's own cell (shared tile) so the PC's surrounding
             // furniture/characters can never block the assistant. Two steps per
             // tick — the assistant walks over twice as fast.
-            if (!haveChild || child == null || child.status != Status.Running)
+            if (_walk == null || !_walk.IsRunning)
             {
-                SetChild(new AI_Goto(pc, 0), KeepRunning);
-                haveChild = true;
+                StopWalk();
+                _walk = new AI_Goto(pc, 0);
+                _walk.SetOwner(owner);
             }
 
-            TickChild();
-            if (child != null && child.status == Status.Running)
+            _walk.Tick();
+            if (_walk != null && _walk.IsRunning)
             {
-                TickChild();
+                _walk.Tick();
             }
 
             yield return Status.Running;
         }
+
+        StopWalk();
 
         if (CoCraftSession.Active && owner != null && !owner.isDead)
         {
