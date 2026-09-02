@@ -191,6 +191,7 @@ internal static partial class LaborText
         ["dis.msg.baseOnly"] = "{0}は拠点でしか使えない。",
         ["dis.msg.busyTalk"] = "{0}は探索中で話せない。",
         ["dis.msg.busyInteract"] = "{0}は探索中で触れられない。",
+        ["dis.msg.isIn"] = "{0}は{1}にいる。",
         ["dis.msg.empty"] = "いま{0}/{1}はない",
         ["dis.ui.activeHeader"] = "— 進行中の任務 —",
         ["dis.ui.randomHeader"] = "— {0} · ランダム —",
