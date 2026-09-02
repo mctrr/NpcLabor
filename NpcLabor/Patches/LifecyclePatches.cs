@@ -42,8 +42,14 @@ internal static class AiUseCrafterPatches
                 return;
             }
 
-            if (CoCraftSession.IsAssistantReady() || CoCraftSession.ApproachExpired())
+            if (CoCraftSession.IsAssistantReady())
             {
+                return;
+            }
+
+            if (CoCraftSession.ApproachExpired())
+            {
+                CoCraftSession.SnapCurrentAssistant();
                 return;
             }
 
@@ -65,6 +71,13 @@ internal static class AiUseCrafterPatches
                 && !CoCraftSession.ApproachExpired())
             {
                 yield return AIAct.Status.Running;
+            }
+
+            // Timeout/blocked path: snap here. The approach AI may still be inside
+            // AI_Goto and cannot run its own fallback until that child ends.
+            if (CoCraftSession.Active && !CoCraftSession.IsAssistantReady())
+            {
+                CoCraftSession.SnapCurrentAssistant();
             }
 
             if (inner == null)
@@ -132,6 +145,18 @@ internal static class AiUseCrafterPatches
 
         // Only assist when the PC is the craft owner.
         if (ai.owner != null && ai.owner != EClass.pc)
+        {
+            return;
+        }
+
+        // Slice B self-processing reuses the vanilla AI_UseCrafter conversion path
+        // (recipe == null on whitelisted drag-grid machines). Co-craft assist must
+        // never attach to that flow: there is no 协助 button on a drag-grid
+        // processor, and an open assist pin/auto would otherwise resolve an
+        // assistant here and hold the PC's conversion until that NPC walks over —
+        // even when the machine operator is set to 自己 (self).
+        if (ai.recipe == null && ai.crafter != null
+            && ProcessorWhitelist.IsSupported(ai.crafter))
         {
             return;
         }
