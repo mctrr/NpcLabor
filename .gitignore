@@ -16,6 +16,7 @@ AGENTS.md
 # Local-only agent / research (do not publish)
 .agents/
 .research/
+.workbuddy/
 
 # Session scratch at repo root
 _tmp_*/
