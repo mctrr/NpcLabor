@@ -719,15 +719,6 @@ internal static partial class LaborText
         ["job.shop.generic.need"] = "{0} needs help",
     };
 
-    // Russian (RU). Russian is a first-class supported language: when the UI
-    // runs in Russian (community pack, Lang/ dir code "RUS") this table is
-    // picked. It starts empty on purpose - T() falls back to En for any key
-    // missing here, so a RU player reads English until someone fills entries
-    // in (drop the translation in below, no other change needed).
-    static readonly Dictionary<string, string> Ru = new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-        // ["term.dungeonExplore"] = "...",
-    };
 
     internal static string T(string key)
     {
