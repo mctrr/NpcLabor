@@ -758,112 +758,56 @@ internal static partial class LaborText
         }
     }
 
-    /// <summary>
-    /// Prefer Japanese when game language looks JP/JA.
-    /// </summary>
-    static bool UseJapanese()
-    {
-        try
-        {
-            if (ProbeLangFlag("isJP") || ProbeLangFlag("isJA"))
-            {
-                return true;
-            }
-
-            string? code = ProbeLangCode();
-            if (code == null || code.Length == 0)
-            {
-                return false;
-            }
-
-            string c = code!.Trim().ToLowerInvariant();
-            return c == "jp" || c == "ja" || c.StartsWith("jp") || c.StartsWith("ja")
-                || c.Contains("japan");
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Prefer Chinese when the game language is Chinese (zh/cn/hans...).
-    /// Explicit so a Chinese UI is never swept into the EN fallback:
-    /// vanilla language codes are the Lang/ directory names ("CN", "JP",
-    /// "EN", and third-party ones like "RUS"), and a CN UI must stay CN.
-    /// </summary>
-    static bool UseChinese()
-    {
-        try
-        {
-            if (ProbeLangFlag("isCN") || ProbeLangFlag("isZH") || ProbeLangFlag("isChinese"))
-            {
-                return true;
-            }
-
-            string? code = ProbeLangCode();
-            if (code == null || code.Length == 0)
-            {
-                return false;
-            }
-
-            string c = code!.Trim().ToLowerInvariant();
-            return c == "cn" || c == "zh" || c == "hans"
-                || c.StartsWith("cn") || c.StartsWith("zh")
-                || c.Contains("chinese") || c.Contains("hans");
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    // Language code the current table was picked for. Changing the in-game
+    // language requires a restart (Lang.Init runs at boot), so caching the
+    // picked table is safe and keeps T() off the reflection hot path.
+    static string? _pickedLang;
+    static Dictionary<string, string>? _picked;
 
     static Dictionary<string, string> PickTable()
     {
-        if (UseJapanese())
+        // Trust Lang.langCode alone: Lang.Init assigns it straight from the
+        // Lang/ directory name ("EN", "JP", "CN", community packs like "RUS").
+        // The isEN/isJP bools are derived from the same string, and flag names
+        // like isCN/isZH do not exist in the game - probing them was dead work.
+        string code = (ProbeLangCode() ?? string.Empty).Trim().ToLowerInvariant();
+        if (_pickedLang == code && _picked != null)
         {
-            return Ja;
+            return _picked;
         }
 
-        if (UseChinese())
+        Dictionary<string, string> table;
+        if (code == "jp" || code == "ja" || code.StartsWith("jp") || code.StartsWith("ja")
+            || code.Contains("japan"))
         {
-            return Cn;
+            table = Ja;
+        }
+        else if (code == "cn" || code == "zh" || code == "hans"
+            || code.StartsWith("cn") || code.StartsWith("zh")
+            || code.Contains("chinese") || code.Contains("hans"))
+        {
+            // Explicit CN/ZH so a Chinese UI is never swept into the EN default.
+            table = Cn;
+        }
+        else if (code == "en" || code.StartsWith("en") || code.Contains("english")
+            || code == "rus" || code == "ru" || code.Contains("russian"))
+        {
+            // Built-in EN plus the community Russian pack (Lang/ directory
+            // code "RUS"): both read the English table. RU is spelled out so
+            // the route is visible - a future RU word table slots in here.
+            table = En;
+        }
+        else
+        {
+            // Any other UI language the mod does not ship (DE/FR/KO/...):
+            // English too. Never default to Chinese here - a non-CN UI that
+            // is not JP must read EN, not CN.
+            table = En;
         }
 
-        // English is the fallback for EN and for any other UI language the mod
-        // does not ship (RU, DE, FR, KO, ...). Never default to Chinese here:
-        // a Russian UI (Lang.langCode == "RUS") must read English, not CN.
-        return En;
-    }
-
-    static bool ProbeLangFlag(string name)
-    {
-        try
-        {
-            Type? langType = typeof(EClass).Assembly.GetType("Lang")
-                ?? Type.GetType("Lang");
-            if (langType == null)
-            {
-                return false;
-            }
-
-            var f = langType.GetField(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (f != null && f.FieldType == typeof(bool))
-            {
-                return (bool)f.GetValue(null);
-            }
-
-            var prop = langType.GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (prop != null && prop.PropertyType == typeof(bool))
-            {
-                return (bool)prop.GetValue(null, null);
-            }
-        }
-        catch
-        {
-        }
-
-        return false;
+        _pickedLang = code;
+        _picked = table;
+        return table;
     }
 
     static string? ProbeLangCode()
