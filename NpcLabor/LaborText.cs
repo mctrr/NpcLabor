@@ -4,9 +4,9 @@ using System.Collections.Generic;
 namespace NpcLabor;
 
 /// <summary>
-/// Lightweight player-facing strings. Language routing: JP -> CN -> EN.
-/// EN doubles as the fallback for UI languages we do not ship (RU/DE/FR/KO/...)
-/// so a Russian or other non-built-in UI reads English instead of Chinese.
+/// Lightweight player-facing strings. Language routing: JP -> CN -> EN, RU
+/// is supported too (its table is empty and falls back to EN per key).
+/// Any UI language without a table of its own reads English, never Chinese.
 /// Keep lean tone; no spreadsheet dumps.
 /// </summary>
 internal static partial class LaborText
@@ -719,6 +719,16 @@ internal static partial class LaborText
         ["job.shop.generic.need"] = "{0} needs help",
     };
 
+    // Russian (RU). Russian is a first-class supported language: when the UI
+    // runs in Russian (community pack, Lang/ dir code "RUS") this table is
+    // picked. It starts empty on purpose - T() falls back to En for any key
+    // missing here, so a RU player reads English until someone fills entries
+    // in (drop the translation in below, no other change needed).
+    static readonly Dictionary<string, string> Ru = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        // ["term.dungeonExplore"] = "...",
+    };
+
     internal static string T(string key)
     {
         Dictionary<string, string> primary = PickTable();
@@ -789,12 +799,15 @@ internal static partial class LaborText
             // Explicit CN/ZH so a Chinese UI is never swept into the EN default.
             table = Cn;
         }
-        else if (code == "en" || code.StartsWith("en") || code.Contains("english")
-            || code == "rus" || code == "ru" || code.Contains("russian"))
+        else if (code == "rus" || code == "ru" || code.Contains("russian"))
         {
-            // Built-in EN plus the community Russian pack (Lang/ directory
-            // code "RUS"): both read the English table. RU is spelled out so
-            // the route is visible - a future RU word table slots in here.
+            // Community Russian pack (Lang/ directory code "RUS"). Russian is
+            // a supported language with its own table; keys T() cannot find
+            // there fall back to En, so RU players read English for now.
+            table = Ru;
+        }
+        else if (code == "en" || code.StartsWith("en") || code.Contains("english"))
+        {
             table = En;
         }
         else
