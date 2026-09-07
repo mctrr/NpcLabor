@@ -295,3 +295,36 @@ try { SE.Beep(); } catch { }
         }
     }
 }
+
+/// <summary>
+/// Freeze PC hunger while they stand a self-work shift (6-12h). Vanilla grows
+/// hunger in Chara.Tick (turn % 50 == 1, rnd(3) == 0 -> hunger.Mod(1)); past
+/// VeryHungry it locks HP regen and at Starving the PC bleeds until the shift
+/// AI gets damage-cancelled. A self-work shift is treated like resting, so
+/// food should not drain. Stats.Hunger is one shared static instance for every
+/// Chara, so a prefix on Stats.Mod can cheaply filter exactly the hunger
+/// growth of the PC while their top-level AI is a self-work shift.
+/// </summary>
+[HarmonyPatch(typeof(Stats), nameof(Stats.Mod))]
+internal static class StatsHungerFreezePatch
+{
+    static bool Prefix(Stats __instance, int a)
+    {
+        try
+        {
+            if (a > 0 && ReferenceEquals(__instance, Stats.Hunger))
+            {
+                Chara? pc = EClass.pc;
+                if (pc != null && pc.ai is AI_TownLaborPcSelf)
+                {
+                    return false;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return true;
+    }
+}
