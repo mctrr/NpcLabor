@@ -895,10 +895,17 @@ var mission = new TownLaborMission
             rewardLog = new List<string>(),
         };
 
-        // Place worker near client and start cosmetic work AI.
+        // Walk-to-work: an on-map worker approaches the client under
+        // AI_TownLabor, so never teleport a worker the player can see. Only an
+        // off-map worker (summoned from home / another zone) is placed here.
         try
         {
-            PlaceWorkerNearClient(worker, client);
+            bool onMap = false;
+            try { onMap = worker.ExistsOnMap && client.ExistsOnMap; } catch { onMap = false; }
+            if (!onMap)
+            {
+                PlaceWorkerNearClient(worker, client);
+            }
         }
         catch (Exception ex)
         {
@@ -1421,13 +1428,16 @@ int spLeft = 1;
             }
         }
 
-        // Soft placement only when very far. No tight leash.
+        // Rare lost-worker guard only: normal drift is walked back by
+        // AI_TownLabor itself (it re-approaches beyond ComfortRadius), so a
+        // mid-range gap must never teleport the worker in front of the player.
+        // Keep the soft re-place for extreme cases (e.g. stuck across the map).
         try
         {
             if (client != null
                 && client.ExistsOnMap
                 && worker.ExistsOnMap
-                && worker.Dist(client) > 12)
+                && worker.Dist(client) > 24)
             {
                 PlaceWorkerNearClient(worker, client, force: false);
             }
