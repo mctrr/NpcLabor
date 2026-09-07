@@ -308,10 +308,13 @@ internal static class ProcessorLeaveZonePatch
             }
             catch { }
 
-            // Town leave dialog may intercept first attempt — skip until confirmed.
+            // PC self-work leave menu may abort the move; hold the processor
+            // suspend until the real leave happens. Companion labor is recalled
+            // synchronously by the leave patch and the move goes through, so it
+            // must NOT skip the suspend here.
             try
             {
-                if (TownLaborManager.ShouldConfirmLeave(z, out _))
+                if (TownLaborManager.HasActivePcSelfLabor())
                 {
                     return;
                 }
@@ -328,16 +331,16 @@ internal static class ProcessorLeaveZonePatch
 }
 
 /// <summary>
-/// Confirm before PC leaves a map while town labor is active.
-/// Real leave starts at Chara.MoveZone; Player.MoveZone is scene init after the move is already committed.
+/// Leaving a work zone while companion labor is active recalls the workers
+/// on the spot (Slice X: no off-map ticking). PC self-work keeps an explicit
+/// leave menu. Real leave starts at Chara.MoveZone; Player.MoveZone is scene
+/// init after the move is already committed.
 /// </summary>
 [HarmonyPatch(typeof(Chara), nameof(Chara.MoveZone), typeof(Zone), typeof(ZoneTransition))]
 internal static class TownLaborLeaveConfirmPatch
 {
-    static bool _allowNextPcMove;
-
     [HarmonyPrefix]
-    static bool Prefix(Chara __instance, Zone z, ZoneTransition transition)
+    static bool Prefix(Chara __instance, Zone z)
     {
         try
         {
@@ -346,26 +349,12 @@ internal static class TownLaborLeaveConfirmPatch
                 return true;
             }
 
-            if (_allowNextPcMove)
-            {
-                _allowNextPcMove = false;
-                try
-                {
-                    if (ProcessorJobSession.Active)
-                    {
-                        ProcessorJobSession.OnPcLeavingZone();
-                    }
-                }
-                catch { }
-                return true;
-            }
-
             if (z == null)
             {
                 return true;
             }
 
-            // Same-zone no-op is already handled in vanilla; still skip confirm.
+            // Same-zone no-op is already handled in vanilla; never recall on it.
             try
             {
                 if (__instance.currentZone != null && __instance.currentZone.uid == z.uid)
@@ -377,53 +366,29 @@ internal static class TownLaborLeaveConfirmPatch
             {
             }
 
-            if (!TownLaborManager.ShouldConfirmLeave(z, out string? prompt) || string.IsNullOrEmpty(prompt))
-            {
-                return true;
-            }
-
-            Zone dest = z;
-            ZoneTransition trans = transition;
-            // PC self-work: multi-choice (abort / hand off / cancel). Companion-only: YesNo.
+            // PC self-work: multi-choice leave menu (abort / hand off / cancel).
+            // The menu resolves on-map; the next leave attempt is free once done.
             if (TownLaborManager.HasActivePcSelfLabor())
             {
-                // Menu itself aborts / hands off; stay on map so the next leave is free.
                 TownLaborUi.OpenPcSelfLeaveMenu();
                 return false;
             }
 
-            Dialog.YesNo(prompt, () =>
+            // Companion labor: leaving the work zone recalls the workers right
+            // here and lets vanilla finish the move. No dialog, no deferred
+            // MoveZone re-entry with a stale transition (the recall-scroll
+            // save-corruption source), and the auto-save inside MoveZone now
+            // writes a state that carries no live mission.
+            try
             {
-                try
-                {
-                    _allowNextPcMove = true;
-                    try
-                    {
-                        if (ProcessorJobSession.Active)
-                        {
-                            ProcessorJobSession.OnPcLeavingZone();
-                        }
-                    }
-                    catch { }
-                    if (EClass.pc != null && dest != null)
-                    {
-                        if (trans != null)
-                        {
-                            EClass.pc.MoveZone(dest, trans);
-                        }
-                        else
-                        {
-                            EClass.pc.MoveZone(dest);
-                        }
-                    }
-                }
-                catch (System.Exception ex)
-                {
-                    _allowNextPcMove = false;
-                    Plugin.LogWarn("townlabor leave confirm yes: " + ex.Message);
-                }
-            });
-            return false;
+                TownLaborManager.RecallCompanionLaborInCurrentZone();
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogWarn("townlabor leave recall: " + ex.Message);
+            }
+
+            return true;
         }
         catch (System.Exception ex)
         {

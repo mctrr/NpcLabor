@@ -26,76 +26,53 @@ internal static class TownLaborManager
     internal static int Count => Missions.Count;
 
     /// <summary>
-    /// True when leaving the current map should prompt about active town labor.
-    /// Companion labor keeps ticking off-map (YesNo confirm).
-    /// PC self-work opens a multi-choice leave menu instead of silent leave.
+    /// Recall every companion mission whose work zone is the current zone.
+    /// Leaving a work zone ends companion labor on the spot (Slice X: no
+    /// off-map ticking). PC self-work is never touched here - the leave
+    /// menu handles it. Returns how many missions were recalled (0 when
+    /// nothing was active or the zone was null).
     /// </summary>
-    internal static bool ShouldConfirmLeave(Zone? dest, out string? prompt)
+    internal static int RecallCompanionLaborInCurrentZone()
     {
-        prompt = null;
-        if (Missions.Count == 0)
-        {
-            return false;
-        }
-
+        var list = new List<TownLaborMission>();
         try
         {
             Zone? cur = EClass._zone;
             if (cur == null)
             {
-                return false;
+                return 0;
             }
 
-            // Same zone or null dest: no leave.
-            if (dest != null && dest.uid == cur.uid)
-            {
-                return false;
-            }
-
-            bool hasPcSelf = false;
-            bool hasAny = false;
-            bool leavingWorkZone = false;
             for (int i = 0; i < Missions.Count; i++)
             {
                 TownLaborMission m = Missions[i];
-                if (m == null)
+                if (m == null || m.isPcSelf)
                 {
                     continue;
                 }
 
-                hasAny = true;
-                if (m.isPcSelf)
+                try
                 {
-                    hasPcSelf = true;
+                    if (m.uidZone == cur.uid)
+                    {
+                        list.Add(m);
+                    }
                 }
-
-                if (m.uidZone == cur.uid)
-                {
-                    leavingWorkZone = true;
-                }
+                catch { }
             }
-
-            if (!hasAny)
-            {
-                return false;
-            }
-
-            // Prompt when leaving the town where labor is running, or any leave during PC self-work.
-            if (!leavingWorkZone && !hasPcSelf)
-            {
-                return false;
-            }
-
-            prompt = hasPcSelf
-                ? NpcLabor.LaborText.T("town.leave.confirmSelf")
-                : NpcLabor.LaborText.T("town.leave.confirm");
-            return !string.IsNullOrEmpty(prompt);
         }
         catch
         {
-            prompt = null;
-            return false;
+            return 0;
         }
+
+        for (int i = 0; i < list.Count; i++)
+        {
+            try { Settle(list[i], TownLaborSettleKind.Recall); }
+            catch (Exception ex) { Plugin.LogWarn("townlabor leave recall: " + ex.Message); }
+        }
+
+        return list.Count;
     }
 
 
@@ -1183,6 +1160,18 @@ var mission = new TownLaborMission
                 {
                     Plugin.LogInfo("townlabor drop dead client id=" + m.missionId);
                     Settle(m, TownLaborSettleKind.Failed);
+                    continue;
+                }
+
+                // Slice X: leaving a work zone recalls companion labor on the
+                // spot. A companion mission whose zone is not the PC's current
+                // one can only survive from an older save (leaving used to keep
+                // it ticking) — recall it instead of letting hours run off-map
+                // toward a success the player is not there to see.
+                if (!pcSelf && !IsWorkZoneActive(m))
+                {
+                    Plugin.LogInfo("townlabor recall off-map mission id=" + m.missionId);
+                    Settle(m, TownLaborSettleKind.Recall);
                     continue;
                 }
 
