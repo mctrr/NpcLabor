@@ -352,6 +352,183 @@ internal static class TownLaborJobs
     }
 
     /// <summary>
+    /// Which storefront a client runs. ResolveBoardTitle picks the wording from this and
+    /// MatchJob picks the job kind, so the two cannot drift apart: the trait ladder lives
+    /// here and nowhere else.
+    /// </summary>
+    enum ShopKind
+    {
+        None,
+        Inn,
+        Kitchen,
+        Book,
+        Scholar,
+        Smith,
+        Fish,
+        Meat,
+        Fruit,
+        Bread,
+        Milk,
+        Booze,
+        Food,
+        Junk,
+        Souvenir,
+        General,
+    }
+
+    /// <summary>
+    /// Classify a client by trait and shop type. <see cref="ShopKind.None"/> means nothing
+    /// matched, and each caller turns that into its own fallback.
+    /// </summary>
+    static ShopKind ClassifyShop(Chara? client)
+    {
+        if (client == null)
+        {
+            return ShopKind.None;
+        }
+
+        Trait? trait = null;
+        try { trait = client.trait; } catch { trait = null; }
+
+        if (trait == null)
+        {
+            return ShopKind.None;
+        }
+
+        ShopType? shop = ShopTypeOf(trait);
+
+        // Inn first: an innkeeper also carries the food merchant trait.
+        if (trait is TraitInnkeeper)
+        {
+            return ShopKind.Inn;
+        }
+
+        if (trait is TraitChef)
+        {
+            return ShopKind.Kitchen;
+        }
+
+        // Bookstore / red-book clerk - before the broad scholar fallback.
+        if (trait is TraitMerchantBook || shop == ShopType.Book || shop == ShopType.RedBook)
+        {
+            return ShopKind.Book;
+        }
+
+        // Desk work: guild clerks, healers, plat library, magic shop.
+        if (trait is TraitGuildClerk
+            || trait is TraitClerk_Mage
+            || trait is TraitClerk_Merchant
+            || trait is TraitClerk_Fighter
+            || trait is TraitClerk_Thief
+            || trait is TraitGuildPersonnel
+            || trait is TraitHealer
+            || trait is TraitMerchantPlat
+            || trait is TraitMerchantMagic
+            || shop == ShopType.Guild
+            || shop == ShopType.Plat
+            || shop == ShopType.Magic
+            || shop == ShopType.Healer)
+        {
+            // Doorman is guild personnel but not desk work.
+            return trait is TraitGuildDoorman ? ShopKind.None : ShopKind.Scholar;
+        }
+
+        // Blacksmith / weapon merchant.
+        if (trait is TraitMerchantWeapon
+            || shop == ShopType.Weapon
+            || string.Equals(SafeAmbience(trait), "blacksmith", StringComparison.OrdinalIgnoreCase))
+        {
+            return ShopKind.Smith;
+        }
+
+        // Specialised food counters keep their own wording.
+        if (trait is TraitMerchantFish)
+        {
+            return ShopKind.Fish;
+        }
+
+        if (trait is TraitMerchantMeat)
+        {
+            return ShopKind.Meat;
+        }
+
+        if (trait is TraitMerchantFruit)
+        {
+            return ShopKind.Fruit;
+        }
+
+        if (trait is TraitMerchantBread)
+        {
+            return ShopKind.Bread;
+        }
+
+        if (trait is TraitMerchantMilk)
+        {
+            return ShopKind.Milk;
+        }
+
+        if (trait is TraitMerchantBooze)
+        {
+            return ShopKind.Booze;
+        }
+
+        // Generic food shop: one that can serve food reads as a kitchen.
+        if (trait is TraitMerchantFood || shop == ShopType.Food)
+        {
+            return CanServeFood(trait) ? ShopKind.Kitchen : ShopKind.Food;
+        }
+
+        // True general goods only - junk / souvenir / general shelves.
+        if (trait is TraitMerchantJunk || shop == ShopType.Junk)
+        {
+            return ShopKind.Junk;
+        }
+
+        if (trait is TraitMerchantSouvenir || shop == ShopType.Souvenir)
+        {
+            return ShopKind.Souvenir;
+        }
+
+        if (trait is TraitMerchantGeneral || trait is TraitMerchantGeneralExotic
+            || shop == ShopType.General || shop == ShopType.GeneralExotic
+            || shop == ShopType.Goods)
+        {
+            return ShopKind.General;
+        }
+
+        return ShopKind.None;
+    }
+
+    /// <summary>Shop type of a merchant trait, or null for anything that is not one.</summary>
+    static ShopType? ShopTypeOf(Trait trait)
+    {
+        try
+        {
+            if (trait is TraitMerchant m)
+            {
+                return m.ShopType;
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    static bool CanServeFood(Trait? trait)
+    {
+        try
+        {
+            return trait is TraitCitizen c && c.CanServeFood;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Player-facing board title for a client. Prefer shop identity over generic clerk labels.
     /// Example: fishmonger -> "鱼店需要人手" instead of "食品店员".
     /// </summary>
@@ -364,124 +541,23 @@ internal static class TownLaborJobs
             return fallback;
         }
 
-        Trait? trait = null;
-        try { trait = client.trait; } catch { trait = null; }
-
-        try
+        switch (ClassifyShop(client))
         {
-            if (trait is TraitInnkeeper)
-            {
-                return J("shop.inn.need");
-            }
-
-            if (trait is TraitChef)
-            {
-                return J("shop.kitchen.need");
-            }
-
-            if (trait is TraitMerchantBook
-                || (trait is TraitMerchant mb && (mb.ShopType == ShopType.Book || mb.ShopType == ShopType.RedBook)))
-            {
-                return J("shop.book.need");
-            }
-
-            if (trait is TraitGuildClerk
-                || trait is TraitClerk_Mage
-                || trait is TraitClerk_Merchant
-                || trait is TraitClerk_Fighter
-                || trait is TraitClerk_Thief
-                || trait is TraitGuildPersonnel
-                || trait is TraitHealer
-                || trait is TraitMerchantPlat
-                || trait is TraitMerchantMagic)
-            {
-                if (trait is TraitGuildDoorman)
-                {
-                    return fallback;
-                }
-
-                return J("shop.scholar.need");
-            }
-
-            if (trait is TraitMerchantWeapon
-                || string.Equals(SafeAmbience(trait), "blacksmith", StringComparison.OrdinalIgnoreCase)
-                || (trait is TraitMerchant mw && mw.ShopType == ShopType.Weapon))
-            {
-                return J("shop.smith.need");
-            }
-
-            if (trait is TraitMerchantFish)
-            {
-                return J("shop.fish.need");
-            }
-
-            if (trait is TraitMerchantMeat)
-            {
-                return J("shop.meat.need");
-            }
-
-            if (trait is TraitMerchantFruit)
-            {
-                return J("shop.fruit.need");
-            }
-
-            if (trait is TraitMerchantBread)
-            {
-                return J("shop.bread.need");
-            }
-
-            if (trait is TraitMerchantMilk)
-            {
-                return J("shop.milk.need");
-            }
-
-            if (trait is TraitMerchantBooze)
-            {
-                return J("shop.booze.need");
-            }
-
-            if (trait is TraitMerchantFood
-                || (trait is TraitMerchant mf && mf.ShopType == ShopType.Food))
-            {
-                // Serve-capable food shop still kitchen; else generic food shop.
-                try
-                {
-                    if (trait is TraitCitizen c2 && c2.CanServeFood)
-                    {
-                        return J("shop.kitchen.need");
-                    }
-                }
-                catch
-                {
-                }
-
-                return J("shop.food.need");
-            }
-
-            if (trait is TraitMerchantGeneral || trait is TraitMerchantGeneralExotic
-                || trait is TraitMerchantJunk || trait is TraitMerchantSouvenir
-                || (trait is TraitMerchant mg
-                    && (mg.ShopType == ShopType.General
-                        || mg.ShopType == ShopType.GeneralExotic
-                        || mg.ShopType == ShopType.Goods
-                        || mg.ShopType == ShopType.Junk
-                        || mg.ShopType == ShopType.Souvenir)))
-            {
-                if (trait is TraitMerchantJunk || (trait is TraitMerchant mj && mj.ShopType == ShopType.Junk))
-                {
-                    return J("shop.junk.need");
-                }
-
-                if (trait is TraitMerchantSouvenir || (trait is TraitMerchant ms && ms.ShopType == ShopType.Souvenir))
-                {
-                    return J("shop.souvenir.need");
-                }
-
-                return J("shop.general.need");
-            }
-        }
-        catch
-        {
+            case ShopKind.Inn: return J("shop.inn.need");
+            case ShopKind.Kitchen: return J("shop.kitchen.need");
+            case ShopKind.Book: return J("shop.book.need");
+            case ShopKind.Scholar: return J("shop.scholar.need");
+            case ShopKind.Smith: return J("shop.smith.need");
+            case ShopKind.Fish: return J("shop.fish.need");
+            case ShopKind.Meat: return J("shop.meat.need");
+            case ShopKind.Fruit: return J("shop.fruit.need");
+            case ShopKind.Bread: return J("shop.bread.need");
+            case ShopKind.Milk: return J("shop.milk.need");
+            case ShopKind.Booze: return J("shop.booze.need");
+            case ShopKind.Food: return J("shop.food.need");
+            case ShopKind.Junk: return J("shop.junk.need");
+            case ShopKind.Souvenir: return J("shop.souvenir.need");
+            case ShopKind.General: return J("shop.general.need");
         }
 
         // Fallback: "<client job/name> needs help" when we only know the generic def.
@@ -523,163 +599,32 @@ internal static class TownLaborJobs
             return null;
         }
 
-        Trait? trait = null;
-        try
+        switch (ClassifyShop(client))
         {
-            trait = client.trait;
-        }
-        catch
-        {
-            return null;
-        }
+            case ShopKind.Inn: return Get(TownLaborJobKind.InnChore);
+            case ShopKind.Kitchen: return Get(TownLaborJobKind.KitchenHelp);
+            case ShopKind.Book: return Get(TownLaborJobKind.BookClerk);
+            case ShopKind.Scholar: return Get(TownLaborJobKind.ScholarAssist);
+            case ShopKind.Smith: return Get(TownLaborJobKind.SmithAssist);
 
-        if (trait == null)
-        {
-            return null;
-        }
+            // Every food counter is the same job; one that can serve food is kitchen help.
+            case ShopKind.Fish:
+            case ShopKind.Meat:
+            case ShopKind.Fruit:
+            case ShopKind.Bread:
+            case ShopKind.Milk:
+            case ShopKind.Booze:
+            case ShopKind.Food:
+                return CanServeFood(client.trait)
+                    ? Get(TownLaborJobKind.KitchenHelp)
+                    : Get(TownLaborJobKind.FoodClerk);
 
-        // Inn first (also is TraitMerchantFood).
-        if (trait is TraitInnkeeper)
-        {
-            return Get(TownLaborJobKind.InnChore);
-        }
-
-        // Kitchen / serve food (chef).
-        if (trait is TraitChef)
-        {
-            return Get(TownLaborJobKind.KitchenHelp);
-        }
-
-        // Bookstore / red-book clerk - before broad merchant fallback.
-        if (trait is TraitMerchantBook)
-        {
-            return Get(TownLaborJobKind.BookClerk);
-        }
-
-        try
-        {
-            if (trait is TraitMerchant mb && (mb.ShopType == ShopType.Book || mb.ShopType == ShopType.RedBook))
-            {
-                return Get(TownLaborJobKind.BookClerk);
-            }
-        }
-        catch
-        {
-        }
-
-        // Scholar / guild clerk / healer desk / plat library - civil-servant-like desk work.
-        if (trait is TraitGuildClerk
-            || trait is TraitClerk_Mage
-            || trait is TraitClerk_Merchant
-            || trait is TraitClerk_Fighter
-            || trait is TraitClerk_Thief
-            || trait is TraitGuildPersonnel
-            || trait is TraitHealer
-            || trait is TraitMerchantPlat
-            || trait is TraitMerchantMagic)
-        {
-            // Doorman is guild personnel but not desk work.
-            if (trait is TraitGuildDoorman)
-            {
-                return null;
-            }
-
-            return Get(TownLaborJobKind.ScholarAssist);
-        }
-
-        try
-        {
-            if (trait is TraitMerchant ms
-                && (ms.ShopType == ShopType.Guild
-                    || ms.ShopType == ShopType.Plat
-                    || ms.ShopType == ShopType.Magic
-                    || ms.ShopType == ShopType.Healer))
-            {
-                return Get(TownLaborJobKind.ScholarAssist);
-            }
-
-            if (trait is TraitHealer)
-            {
-                return Get(TownLaborJobKind.ScholarAssist);
-            }
-        }
-        catch
-        {
-        }
-
-        // Blacksmith / weapon merchant.
-        if (trait is TraitMerchantWeapon
-            || string.Equals(SafeAmbience(trait), "blacksmith", StringComparison.OrdinalIgnoreCase))
-        {
-            return Get(TownLaborJobKind.SmithAssist);
-        }
-
-        try
-        {
-            if (trait is TraitMerchant m && m.ShopType == ShopType.Weapon)
-            {
-                return Get(TownLaborJobKind.SmithAssist);
-            }
-        }
-        catch
-        {
-        }
-
-        // Food merchant (non-inn). Serve-capable -> kitchen help, else food clerk.
-        if (trait is TraitMerchantFood || trait is TraitMerchantMeat || trait is TraitMerchantFish
-            || trait is TraitMerchantFruit || trait is TraitMerchantBread || trait is TraitMerchantMilk
-            || trait is TraitMerchantBooze)
-        {
-            try
-            {
-                if (trait is TraitCitizen c2 && c2.CanServeFood)
-                {
-                    return Get(TownLaborJobKind.KitchenHelp);
-                }
-            }
-            catch
-            {
-            }
-
-            return Get(TownLaborJobKind.FoodClerk);
-        }
-
-        try
-        {
-            if (trait is TraitMerchant m2 && m2.ShopType == ShopType.Food)
-            {
-                return Get(TownLaborJobKind.FoodClerk);
-            }
-        }
-        catch
-        {
-        }
-
-        // True general goods only - junk/souvenir/general shelves.
-        // Do NOT collapse book/scholar/magic/etc. into 杂货店员.
-        if (trait is TraitMerchantGeneral || trait is TraitMerchantGeneralExotic
-            || trait is TraitMerchantJunk || trait is TraitMerchantSouvenir)
-        {
-            return Get(TownLaborJobKind.GeneralClerk);
-        }
-
-        try
-        {
-            if (trait is TraitMerchant m3
-                && (m3.ShopType == ShopType.General
-                    || m3.ShopType == ShopType.GeneralExotic
-                    || m3.ShopType == ShopType.Goods
-                    || m3.ShopType == ShopType.Junk
-                    || m3.ShopType == ShopType.Souvenir))
-            {
+            case ShopKind.Junk:
+            case ShopKind.Souvenir:
+            case ShopKind.General:
                 return Get(TownLaborJobKind.GeneralClerk);
-            }
-        }
-        catch
-        {
         }
 
-        // No broad "any investable merchant -> general clerk" fallback.
         return null;
     }
 
