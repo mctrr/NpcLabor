@@ -1064,10 +1064,6 @@ int exp = 0;
         }
     }
 
-    static void ReturnIngs(List<Thing> ings)
-    {
-        CleanupPartialIngs(ings);
-    }
 }
 
 

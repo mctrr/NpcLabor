@@ -131,9 +131,6 @@ internal sealed class TownLaborMission
         }
     }
 
-    [JsonIgnore]
-    public float DaysLeft => Math.Max(0, hoursLeft) / 24f;
-
     internal TownLaborJobDef? Def => TownLaborJobs.GetById(jobId) ?? TownLaborJobs.Get(Kind);
 
     internal Chara? GetWorker()

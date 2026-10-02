@@ -180,19 +180,6 @@ internal static class CraftEngine
         return string.IsNullOrEmpty(recipeId) ? "?" : recipeId;
     }
 
-    /// <summary>Category a recipe is filed under, used to group the picker.</summary>
-    internal static string Category(string recipeId)
-    {
-        try
-        {
-            return Source(recipeId)?.recipeCat ?? "";
-        }
-        catch
-        {
-            return "";
-        }
-    }
-
     /// <summary>The workbench a recipe needs, or an empty string when it needs none.</summary>
     internal static string Factory(string recipeId)
     {

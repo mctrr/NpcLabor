@@ -248,33 +248,6 @@ return true;
     internal static string NameOf(Chara c)
         => c.NameSimple ?? c.Name ?? ("#" + c.uid);
 
-    internal static string DescribeCurrent(int previewSkillId = 0)
-    {
-        if (IsOff)
-        {
-            return NpcLabor.LaborText.T("co.mode.off");
-        }
-
-        if (IsAuto)
-        {
-            Chara? auto = FindBestForSkill(previewSkillId);
-            if (auto != null)
-            {
-                return NpcLabor.LaborText.T("co.mode.autoName", NameOf(auto));
-            }
-
-            return NpcLabor.LaborText.T("co.mode.autoUnknown");
-        }
-
-        Chara? pinned = GetPinned();
-        if (pinned != null)
-        {
-            return NameOf(pinned);
-        }
-
-        return NpcLabor.LaborText.T("co.mode.off");
-    }
-
     internal static Chara? ResolveForCraft(int skillId)
     {
         if (IsOff)

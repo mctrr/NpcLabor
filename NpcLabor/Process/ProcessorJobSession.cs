@@ -435,21 +435,6 @@ internal static class ProcessorJobSession
         }
     }
 
-    /// <summary>Parked claimed stacks still sitting on the machine.</summary>
-    internal static bool HasUnconsumedIngredients()
-    {
-        for (int i = 0; i < Ingredients.Count; i++)
-        {
-            Thing? t = Ingredients[i];
-            if (t != null && !t.isDestroyed && t.Num > 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     /// <summary>True when the claimed ingredient stacks are still usable and sitting on a map cell, not inside the PC.</summary>
     internal static bool CanUseIngredientStacks()
     {

@@ -471,11 +471,6 @@ internal static class DungeonDispatchTargets
         return Math.Max(1, days);
     }
 
-    internal static int GetExploreBonus(int exploreSkill, int lockpickSkill, int gatherSkill = 0)
-    {
-        return exploreSkill / 5 + lockpickSkill / 10 + gatherSkill / 12;
-    }
-
     internal static int GetSuccessChance(int combatPower, int dangerLv, int exploreSkill, int lockpickSkill, int gatherSkill = 0)
     {
         int power = Math.Max(1, combatPower);
@@ -571,27 +566,6 @@ internal static class DungeonDispatchTargets
         {
             return baseHours;
         }
-    }
-
-    internal static string RewardTierLabel(int dangerLv, int exploreSkill, int lockpickSkill, int gatherSkill = 0)
-    {
-        int score = dangerLv + exploreSkill / 10 + lockpickSkill / 20 + gatherSkill / 15;
-        if (score >= 40)
-        {
-            return NpcLabor.LaborText.T("dis.yield.rich");
-        }
-
-        if (score >= 20)
-        {
-            return NpcLabor.LaborText.T("dis.yield.medium");
-        }
-
-        if (score >= 8)
-        {
-            return NpcLabor.LaborText.T("dis.yield.normal");
-        }
-
-        return NpcLabor.LaborText.T("dis.yield.meager");
     }
 
     /// <summary>
@@ -719,76 +693,6 @@ internal static class DungeonDispatchTargets
         }
 
         return best;
-    }
-
-    internal static string PreviewText(DungeonDispatchTarget target, IList<Chara> members)
-    {
-        int power = AggregateCombatPower(members);
-        int explore = AggregateSkill(members, DungeonDispatchMission.SkillExplore);
-        int lockpick = AggregateSkill(members, DungeonDispatchMission.SkillLockpick);
-        int gather = target != null && target.IsRegion
-            ? AggregateRegionGather(members, target.RegionKind)
-            : AggregateGatherSkill(members, target?.Zone);
-
-        string names = "";
-        for (int i = 0; i < members.Count; i++)
-        {
-            if (i > 0)
-            {
-                names += "、";
-            }
-
-            try
-            {
-                names += members[i].NameSimple ?? members[i].Name ?? ("#" + members[i].uid);
-            }
-            catch
-            {
-                names += "#" + members[i].uid;
-            }
-        }
-
-        if (target != null && target.IsRegion)
-        {
-            int weeks = 1;
-            return NpcLabor.LaborText.T(
-                "dis.preview.region",
-                target.Name,
-                NpcLabor.LaborTerms.RegionDispatch,
-                target.Compass,
-                members.Count,
-                names,
-                weeks,
-                explore,
-                lockpick,
-                gather);
-        }
-
-        if (target == null)
-        {
-            return names;
-        }
-
-        int dangerDays = GetDangerDays(target.DangerLv, power);
-        int baseHours = GetBaseHours(target, dangerDays);
-        int chance = GetSuccessChance(power, target.DangerLv, explore, lockpick, gather);
-        string kind = target.IsRandomSite
-            ? NpcLabor.LaborText.T("dis.kind.randomDungeon")
-            : NpcLabor.LaborText.T("dis.kind.fixedDungeon");
-        return NpcLabor.LaborText.T(
-            "dis.preview.dungeon",
-            target.Name,
-            kind,
-            target.DangerLv,
-            target.Compass,
-            members.Count,
-            names,
-            Mathf.CeilToInt(baseHours / 24f),
-            chance,
-            power,
-            explore,
-            lockpick,
-            gather);
     }
 
     internal static int SafeSkill(Chara c, int id)
@@ -1769,46 +1673,6 @@ internal static class DungeonDispatchTargets
 
         int dir = deepest < entrance ? -1 : 1;
         return entrance + dir * idx;
-    }
-
-    internal static int EstimateTotalFloors(Zone root)
-    {
-        if (root == null)
-        {
-            return 1;
-        }
-
-        Zone top;
-        try
-        {
-            top = root.GetTopZone() ?? root;
-        }
-        catch
-        {
-            top = root;
-        }
-
-        int entrance = SafeZoneLv(top);
-        int deepest = entrance;
-        try
-        {
-            deepest = top.GetDeepestLv();
-        }
-        catch
-        {
-        }
-
-        List<Zone> floors = ListExistingFloors(top);
-        for (int i = 0; i < floors.Count; i++)
-        {
-            int lv = SafeZoneLv(floors[i]);
-            if (FloorDepth(entrance, lv) > FloorDepth(entrance, deepest))
-            {
-                deepest = lv;
-            }
-        }
-
-        return Math.Max(1, FloorDepth(entrance, deepest) + 1);
     }
 
     static int FloorDepth(int entranceLv, int floorLv)

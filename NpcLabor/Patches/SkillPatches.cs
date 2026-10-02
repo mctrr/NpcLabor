@@ -46,8 +46,8 @@ internal static class SkillPatches
         }
     }
 
-    // Npc skill for duration id is stored on session via reflection-free mirror field access through public NpcSkill
-    // when ids match; when they differ CoCraftSession.TryGetEff handles it. Keep a small helper:
+    // Duration skill: read it straight off the pinned assistant so a differing skill id
+    // still resolves, and fall back to the session mirror the duration patch writes.
     static int GetDurationNpcSkill()
     {
         Chara? npc = CoCraftSession.GetAssistant();

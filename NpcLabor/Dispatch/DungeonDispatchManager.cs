@@ -626,27 +626,6 @@ return "name:" + (target.Name ?? "");
         return picked;
     }
 
-    internal static int EstimateTeamHarvestScore(DungeonDispatchTarget target, IList<Chara> members)
-    {
-        if (target == null || members == null || members.Count == 0)
-        {
-            return 0;
-        }
-
-        int explore = DungeonDispatchTargets.AggregateSkill(members, DungeonDispatchMission.SkillExplore);
-        int lockpick = DungeonDispatchTargets.AggregateSkill(members, DungeonDispatchMission.SkillLockpick);
-        int gather;
-        if (target.IsRegion)
-        {
-            gather = DungeonDispatchTargets.AggregateRegionGather(members, target.RegionKind);
-            return explore + gather + lockpick;
-        }
-
-        gather = DungeonDispatchTargets.AggregateGatherSkill(members, target.Zone);
-        int power = DungeonDispatchTargets.AggregateCombatPower(members);
-        return power * 8 + explore + gather + lockpick;
-    }
-
     internal static string? TryStart(IList<Chara> workers, DungeonDispatchTarget target, int exploreWeeks = 1)
     {
         if (target == null)
@@ -1095,17 +1074,6 @@ Plugin.LogInfo("dispatch start mission=" + mission.missionId + " members=" + mem
             Plugin.LogWarn("dispatch TryStart failed: " + ex);
             return NpcLabor.LaborText.T("dis.error.startFail", ex.Message);
         }
-    }
-
-    // Back-compat single-worker entry.
-    internal static string? TryStart(Chara worker, Zone target)
-    {
-        if (worker == null)
-        {
-            return NpcLabor.LaborText.T("dis.error.invalidTarget");
-        }
-
-        return TryStart(new List<Chara> { worker }, target);
     }
 
     static int SafeLv(Zone z)

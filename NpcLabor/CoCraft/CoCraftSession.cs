@@ -55,31 +55,6 @@ internal static class CoCraftSession
         return _npcSkillReq;
     }
 
-    internal static bool TryGetEff(int skillId, out int eff)
-    {
-        eff = 0;
-        if (!Active)
-        {
-            return false;
-        }
-
-        if (skillId != ReqSkillId && skillId != DurationSkillId)
-        {
-            return false;
-        }
-
-        int pc = EClass.pc != null ? EClass.pc.Evalue(skillId) : PcSkill;
-        int npcPart = Mathf.FloorToInt(GetNpcSkillFor(skillId) * NpcSkillWeight);
-        Element? el = EClass.pc?.elements?.GetOrCreateElement(skillId);
-        if (el != null)
-        {
-            pc = el.Value;
-        }
-
-        eff = pc + npcPart;
-        return true;
-    }
-
     internal static bool Open(Chara assistant, Recipe? recipe, TraitCrafter? crafter)
     {
         Clear("reopen", announce: false);

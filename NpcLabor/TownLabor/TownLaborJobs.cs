@@ -718,6 +718,4 @@ internal static class TownLaborJobs
         return null;
     }
 
-    internal static string KindLabel(TownLaborJobKind kind)
-        => Get(kind)?.Title ?? kind.ToString();
 }

@@ -2652,11 +2652,6 @@ StartPcSelfApproach(m, pc);
         }
     }
 
-    internal static void RefreshTrackerQuestsPublic()
-    {
-        RefreshTrackerQuests();
-    }
-
     static void RefreshTrackerQuests()
     {
         // Ensure every mission has exactly one tracker; drop orphans/dups/legacy.
