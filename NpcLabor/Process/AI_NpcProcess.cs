@@ -170,73 +170,14 @@ internal class AI_NpcProcess : AIAct
             }
 
             // Split one set of ingredients for this craft.
-            List<Thing> ings = new List<Thing>();
-            BlessedState blessed = BlessedState.Normal;
-            for (int i = 0; i < sources.Count; i++)
+            if (!PrepareOneCraft(owner, crafter, machine, sources,
+                    out List<Thing> ings, out BlessedState blessed, out bool requireOn,
+                    out AI_UseCrafter shell, out int costSp, out int duration))
             {
-                Thing src = sources[i];
-                if (src == null || src.isDestroyed || src.Num <= 0)
-                {
-                    CleanupPartialIngs(ings);
-                    ProcessorJobSession.Clear("no-ings");
-                    yield return Cancel();
-                    yield break;
-                }
-
-                if (!ProcessorJobSession.TryTakeCraftPiece(src, crafter, machine, owner, out Thing? piece)
-                    || piece == null)
-                {
-                    CleanupPartialIngs(ings);
-                    ProcessorJobSession.Clear("no-ings");
-                    yield return Cancel();
-                    yield break;
-                }
-
-                ings.Add(piece);
-                if (piece.blessedState <= BlessedState.Cursed && blessed > piece.blessedState)
-                {
-                    blessed = piece.blessedState;
-                }
-
-                if (piece.blessedState > BlessedState.Normal && blessed == BlessedState.Normal)
-                {
-                    blessed = piece.blessedState;
-                }
+                ProcessorJobSession.Clear("no-ings");
+                yield return Cancel();
+                yield break;
             }
-
-            bool requireOn = crafter.IsRequireFuel || crafter.ToggleType != ToggleType.None;
-            if (requireOn && !machine.isOn)
-            {
-                try
-                {
-                    crafter.Toggle(on: true);
-                }
-                catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-}
-
-            // Build a throwaway AI_UseCrafter shell so GetSource / Craft / GetCostSp keep working.
-            AI_UseCrafter shell = new AI_UseCrafter
-            {
-                crafter = crafter,
-                recipe = null,
-                num = 1,
-                ings = ings,
-                owner = owner
-            };
-
-            int baseSp;
-            try
-            {
-                baseSp = crafter.GetCostSp(shell);
-            }
-            catch
-            {
-                baseSp = crafter.CostSP;
-            }
-
-            int costSp = ProcessorJobSession.AdjustCostSp(baseSp);
-            int duration = ComputeDuration(crafter, shell, costSp);
-            ProcessorJobSession.RememberCraftTiming(duration, costSp);
 
             if (!crafter.idSoundBG.IsEmpty())
             {
@@ -910,51 +851,14 @@ int exp = 0;
         int remainingBefore = ProcessorJobSession.Remaining;
         int completedBefore = ProcessorJobSession.Completed;
         List<Thing> ings = new List<Thing>();
-        BlessedState blessed = BlessedState.Normal;
         try
         {
-            for (int i = 0; i < sources.Count; i++)
+            if (!PrepareOneCraft(worker, crafter, machine, sources,
+                    out ings, out BlessedState blessed, out _,
+                    out AI_UseCrafter shell, out int costSp, out int duration))
             {
-                Thing src = sources[i];
-                if (!ProcessorJobSession.TryTakeCraftPiece(src, crafter, machine, worker, out Thing? piece)
-                    || piece == null)
-                {
-                    CleanupPartialIngs(ings);
-                    return false;
-                }
-
-                ings.Add(piece);
-                if (piece.blessedState <= BlessedState.Cursed && blessed > piece.blessedState)
-                {
-                    blessed = piece.blessedState;
-                }
-                if (piece.blessedState > BlessedState.Normal && blessed == BlessedState.Normal)
-                {
-                    blessed = piece.blessedState;
-                }
+                return false;
             }
-
-            bool requireOn = crafter.IsRequireFuel || crafter.ToggleType != ToggleType.None;
-            if (requireOn && !machine.isOn)
-            {
-                try { crafter.Toggle(on: true); } catch { }
-            }
-
-            AI_UseCrafter shell = new AI_UseCrafter
-            {
-                crafter = crafter,
-                recipe = null,
-                num = 1,
-                ings = ings,
-                owner = worker
-            };
-
-            int baseSp;
-            try { baseSp = crafter.GetCostSp(shell); }
-            catch { baseSp = crafter.CostSP; }
-            int costSp = ProcessorJobSession.AdjustCostSp(baseSp);
-            int duration = ComputeDuration(crafter, shell, costSp);
-            ProcessorJobSession.RememberCraftTiming(duration, costSp);
 
             CompleteOne(worker, crafter, machine, shell, ings, blessed, costSp, duration);
 
@@ -1007,6 +911,88 @@ int exp = 0;
             CleanupPartialIngs(ings);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Split one set of ingredients and work out the shell, SP and duration for this craft.
+    /// Shared by the live cycle (Run) and the return catch-up (TryCatchUpOne) so the two
+    /// cannot drift apart. Returns false when a piece cannot be taken — the caller owns
+    /// whatever else has to happen (clear the session, cancel the AI, ...).
+    /// </summary>
+    static bool PrepareOneCraft(
+        Chara worker, TraitCrafter crafter, Card machine, IList<Thing> sources,
+        out List<Thing> ings, out BlessedState blessed, out bool requireOn,
+        out AI_UseCrafter shell, out int costSp, out int duration)
+    {
+        ings = new List<Thing>();
+        blessed = BlessedState.Normal;
+        shell = null!;
+        requireOn = false;
+        costSp = 0;
+        duration = 0;
+
+        for (int i = 0; i < sources.Count; i++)
+        {
+            Thing src = sources[i];
+            if (src == null || src.isDestroyed || src.Num <= 0)
+            {
+                CleanupPartialIngs(ings);
+                return false;
+            }
+
+            if (!ProcessorJobSession.TryTakeCraftPiece(src, crafter, machine, worker, out Thing? piece)
+                || piece == null)
+            {
+                CleanupPartialIngs(ings);
+                return false;
+            }
+
+            ings.Add(piece);
+            if (piece.blessedState <= BlessedState.Cursed && blessed > piece.blessedState)
+            {
+                blessed = piece.blessedState;
+            }
+
+            if (piece.blessedState > BlessedState.Normal && blessed == BlessedState.Normal)
+            {
+                blessed = piece.blessedState;
+            }
+        }
+
+        requireOn = crafter.IsRequireFuel || crafter.ToggleType != ToggleType.None;
+        if (requireOn && !machine.isOn)
+        {
+            try
+            {
+                crafter.Toggle(on: true);
+            }
+            catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
+        }
+
+        // Build a throwaway AI_UseCrafter shell so GetSource / Craft / GetCostSp keep working.
+        shell = new AI_UseCrafter
+        {
+            crafter = crafter,
+            recipe = null,
+            num = 1,
+            ings = ings,
+            owner = worker
+        };
+
+        int baseSp;
+        try
+        {
+            baseSp = crafter.GetCostSp(shell);
+        }
+        catch
+        {
+            baseSp = crafter.CostSP;
+        }
+
+        costSp = ProcessorJobSession.AdjustCostSp(baseSp);
+        duration = ComputeDuration(crafter, shell, costSp);
+        ProcessorJobSession.RememberCraftTiming(duration, costSp);
+        return true;
     }
 
     static void CleanupPartialIngs(List<Thing> ings)
