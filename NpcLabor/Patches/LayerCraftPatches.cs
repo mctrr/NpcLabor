@@ -234,7 +234,7 @@ internal static class LayerCraftPatches
             btn.onClick.RemoveAllListeners();
         }
         catch (System.Exception __e) { Plugin.LogDebug("LayerCraftPatches.cs silent catch: " + __e.Message); }
-try
+        try
         {
             btn.isChecked = false;
             if (btn.imageCheck != null)
@@ -941,7 +941,7 @@ return "";
                 btn.mainText.SetText(label);
             }
             catch (System.Exception __e) { Plugin.LogDebug("LayerCraftPatches.cs silent catch: " + __e.Message); }
-try
+            try
             {
                 ContentSizeFitter? f = btn.mainText.GetComponent<ContentSizeFitter>();
                 if (f != null)

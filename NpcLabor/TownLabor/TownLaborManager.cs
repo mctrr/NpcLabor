@@ -204,7 +204,7 @@ internal static class TownLaborManager
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (person != null)
             {
@@ -216,7 +216,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (EClass._map?.charas != null)
             {
@@ -230,7 +230,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             Chara? global = RefChara.Get(uid);
             if (global != null && !global.isDead)
@@ -239,7 +239,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             FactionBranch? branch = EClass.BranchOrHomeBranch ?? EClass.Branch;
             if (branch?.members != null)
@@ -254,7 +254,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (EClass.pc?.party?.members != null)
             {
@@ -653,7 +653,7 @@ list.Sort((a, b) =>
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (ProcessorJobSession.IsJobHeld())
             {
@@ -1443,7 +1443,7 @@ int spLeft = 1;
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (!(worker.ai is AI_TownLabor labor) || labor.missionId != m.missionId)
             {
@@ -1535,7 +1535,7 @@ if (dest == null)
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (client.pos != null && dest.Equals(client.pos))
             {
@@ -2115,7 +2115,7 @@ Party? party = EClass.pc?.party;
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             // Migrate old saves: lock reward pins so descriptions match payouts.
             foreach (TownLaborMission m in Missions)
@@ -2171,7 +2171,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             pc.SetAIImmediate(new AI_TownLaborPcSelf { missionId = mission.missionId });
         }

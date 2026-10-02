@@ -305,7 +305,7 @@ internal class AI_NpcProcess : AIAct
                         owner.PlaySound(crafter.idSoundProgress);
                     }
                     catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-try
+                    try
                     {
                         if (machine != null && machine.ExistsOnMap)
                         {
@@ -677,7 +677,7 @@ yield return Do(progress);
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
-try
+        try
         {
             owner.PlaySound(crafter.idSoundComplete);
         }

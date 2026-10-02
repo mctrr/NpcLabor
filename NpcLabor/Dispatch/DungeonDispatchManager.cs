@@ -237,7 +237,7 @@ internal static class DungeonDispatchManager
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             FactionBranch? branch = EClass.BranchOrHomeBranch ?? EClass.Branch;
             if (branch?.members != null)
@@ -355,7 +355,7 @@ list.Sort((a, b) =>
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (target.Zone != null && !string.IsNullOrEmpty(target.Zone.id))
             {
@@ -1081,7 +1081,7 @@ var mission = new DungeonDispatchMission
                 Msg.Say(msg);
             }
             catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+            try
             {
                 branch.LogRaw(msg);
             }
@@ -1137,28 +1137,32 @@ Plugin.LogInfo("dispatch start mission=" + mission.missionId + " members=" + mem
             c.SetHostility(Hostility.Friend);
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+
+        try
         {
             c.noMove = true;
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+
+        try
         {
             c.enemy = null;
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+
+        try
         {
             // Keep them from normal resident talk trees while exploring.
             c.isRestrained = true;
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+
+        try
         {
             c.SetAIIdle();
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+    }
 
     internal static void ClearDispatchedFlags(Chara? c)
     {
@@ -1172,12 +1176,29 @@ try
             c.noMove = false;
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+
+        try
         {
             c.isRestrained = false;
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-}
+
+        try
+        {
+            // PrepareDispatchedChara cleared the target. Keep it cleared so a returning
+            // worker does not charge straight back into whatever it was fighting.
+            c.enemy = null;
+        }
+        catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
+
+        try
+        {
+            // Hand the worker back to the normal resident AI instead of leaving it
+            // parked on whatever state the dispatch left behind.
+            c.SetAIIdle();
+        }
+        catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
+    }
 
     internal static bool TryRecall(int missionIdOrCharaUid)
     {
@@ -1465,7 +1486,7 @@ if (m.hoursLeft <= 0)
             DungeonDispatchRewards.GrantExp(members, kind, m);
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             DungeonDispatchRewards.GrantFameOnDungeonSuccess(m, kind);
         }
@@ -1559,7 +1580,7 @@ try
             Msg.Say(msg);
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchManager.cs silent catch: " + __e.Message); }
-try
+        try
         {
             branch?.LogRaw(msg);
         }
@@ -1584,6 +1605,11 @@ Plugin.LogInfo("dispatch settle kind=" + kind + " mission=" + m.missionId + " zo
 
         m.EnsureMemberList();
         m.uidMembers.Remove(c.uid);
+
+        // Nothing else runs for a dead worker, so drop the dispatch flags here —
+        // otherwise noMove / isRestrained stay stuck to the body.
+        ClearDispatchedFlags(c);
+
         if (m.uidMembers.Count == 0)
         {
             Missions.Remove(m);

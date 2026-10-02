@@ -539,7 +539,7 @@ foreach (Thing t in things)
             return ThingGen.CreateCurrency(amount, "money");
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborRewards.cs silent catch: " + __e.Message); }
-try
+        try
         {
             Thing? t = ThingGen.Create("money");
             if (t != null)
@@ -572,7 +572,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("TownLaborRewards.cs silent catch: " + __e.Message); }
-try
+        try
         {
             return ThingGen.Create("plat").SetNum(amount);
         }

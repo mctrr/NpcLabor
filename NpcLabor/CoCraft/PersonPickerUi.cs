@@ -146,7 +146,7 @@ internal static class PersonPickerUi
                         item.button1.subText.rectTransform.anchoredPosition = new Vector2(210f, 0f);
                     }
                     catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
-try
+                    try
                     {
                         if (item.button1.mainText != null)
                         {
@@ -268,7 +268,7 @@ try
                 }
             }
             catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
-try
+            try
             {
                 // Kill any leftover native scale from SetImage pivots.
                 icon.transform.localScale = Vector3.one;
@@ -317,7 +317,7 @@ try
                         }
                     }
                     catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
-try
+                    try
                     {
                         CanvasGroup? cg = key.GetComponent<CanvasGroup>();
                         if (cg != null)
@@ -327,7 +327,7 @@ try
                         }
                     }
                     catch (System.Exception __e) { Plugin.LogDebug("PersonPickerUi.cs silent catch: " + __e.Message); }
-try
+                    try
                     {
                         // Ensure letter draws on top of any oversized sprite bleed.
                         var c = key.color;

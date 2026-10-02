@@ -216,7 +216,7 @@ GameObject go = Object.Instantiate(mold.gameObject, parent);
                 btn.onClick.RemoveAllListeners();
             }
             catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
-try
+            try
             {
                 if (btn.icon != null)
                 {
@@ -403,7 +403,7 @@ return null;
                 }
             }
             catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
-try
+            try
             {
                 menu.SetHeader(title);
             }

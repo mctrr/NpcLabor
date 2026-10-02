@@ -426,7 +426,7 @@ return null;
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchMission.cs silent catch: " + __e.Message); }
-try
+        try
         {
             foreach (Chara c in GetMembers())
             {
@@ -437,7 +437,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchMission.cs silent catch: " + __e.Message); }
-try
+        try
         {
             return EClass.pc?.homeZone ?? EClass.BranchOrHomeBranch?.owner ?? EClass.Branch?.owner;
         }

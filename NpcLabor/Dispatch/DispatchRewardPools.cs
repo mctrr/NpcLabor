@@ -761,7 +761,7 @@ internal static partial class DungeonDispatchRewards
                     return biomes.Water;
                 }
 
-try
+            try
             {
                 if (biomes.dict != null)
                 {
@@ -833,7 +833,7 @@ return null;
                     }
                 }
 
-try
+            try
             {
                 if (bp.cluster != null && bp.cluster.thing != null)
                 {
@@ -868,7 +868,7 @@ try
                 }
             }
             catch (System.Exception __e) { Plugin.LogDebug("DungeonDispatchRewards.cs silent catch: " + __e.Message); }
-try
+            try
             {
                 if (bp.cluster != null && bp.cluster.obj != null)
                 {

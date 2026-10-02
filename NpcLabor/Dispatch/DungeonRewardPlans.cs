@@ -459,7 +459,7 @@ return false;
     internal static int BossRewardLv(DungeonDispatchMission? mission)
     {
         int danger = mission == null ? 1 : Math.Max(1, mission.dangerLv);
-        return Math.Max(1, Mathf.RoundToInt(danger * 1.2f));
+        return Math.Max(1, Mathf.RoundToInt(danger * NpcLabor.LaborConfig.BossRewardMult));
     }
 
 

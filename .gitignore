@@ -6,8 +6,10 @@
 *.userprefs
 *.cache
 
-# Deploy / game output
-Package/
+# Deploy / game output (repo root only —
+# NpcLabor/package/ is tracked mod metadata, and a bare Package/ also matches it
+# on case-insensitive filesystems, which makes git add refuse the folder).
+/Package/
 
 # Local product docs / art (do not publish)
 docs/

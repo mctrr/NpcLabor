@@ -254,11 +254,11 @@ internal static class TownLaborShowDialogPatch
 
             try
             {
-        string who = __instance.NameSimple ?? __instance.Name ?? NpcLabor.LaborText.T("town.msg.companion");
-        Msg.Say(NpcLabor.LaborText.T("town.talk.busy", who, NpcLabor.LaborTerms.TownWork));
+                string who = __instance.NameSimple ?? __instance.Name ?? NpcLabor.LaborText.T("town.msg.companion");
+                Msg.Say(NpcLabor.LaborText.T("town.talk.busy", who, NpcLabor.LaborTerms.TownWork));
             }
             catch (System.Exception __e) { Plugin.LogDebug("TownLaborPatches.cs silent catch: " + __e.Message); }
-try { SE.Beep(); } catch { }
+            try { SE.Beep(); } catch { }
             return false;
         }
         catch
@@ -289,11 +289,11 @@ internal static class TownLaborLayerInteractionPatch
 
             try
             {
-        string who = c.NameSimple ?? c.Name ?? NpcLabor.LaborText.T("town.msg.companion");
-        Msg.Say(NpcLabor.LaborText.T("town.talk.noInteract", who, NpcLabor.LaborTerms.TownWork));
+                string who = c.NameSimple ?? c.Name ?? NpcLabor.LaborText.T("town.msg.companion");
+                Msg.Say(NpcLabor.LaborText.T("town.talk.noInteract", who, NpcLabor.LaborTerms.TownWork));
             }
             catch (System.Exception __e) { Plugin.LogDebug("TownLaborPatches.cs silent catch: " + __e.Message); }
-try { SE.Beep(); } catch { }
+            try { SE.Beep(); } catch { }
             return false;
         }
         catch
