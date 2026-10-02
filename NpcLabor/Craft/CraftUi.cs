@@ -6,7 +6,7 @@ namespace NpcLabor.Craft;
 
 /// <summary>
 /// Base production panel (slice G). Reached from the same dispatch board as the caravan,
-/// next to the trade row, because both are "tell the people at home what to do".
+/// beside dispatch, because both are "tell the people at home what to do".
 ///
 /// Pages: the assignment list, a worker picker, a paged recipe picker, and the amount
 /// step. The drop-off tag is placed straight from the first page, since it is a physical
