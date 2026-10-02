@@ -6,59 +6,65 @@ using NpcLabor.Process;
 namespace NpcLabor.TownLabor;
 
 /// <summary>
-/// Shared busy check across A co-craft / B processor / D dispatch / E town labor.
+/// Shared busy check across A co-craft / B processor / D dispatch / E town labor / G production.
 /// </summary>
 internal static class LaborBusy
 {
-    internal static bool IsBusy(int uidChara)
+    /// <summary>One probe per slice: does this slice hold the character, and what to say about it.</summary>
+    sealed class SliceProbe
     {
-        if (uidChara <= 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            if (TownLaborManager.IsBusy(uidChara))
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (DungeonDispatchManager.IsBusy(uidChara))
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uidChara)
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (CoCraftSession.Active && CoCraftSession.NpcUid == uidChara)
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (CraftManager.Has(uidChara))
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-return false;
+        internal string Name = "";
+        internal System.Func<int, bool> Holds = _ => false;
+        internal System.Func<string?> Reason = () => null;
     }
+
+    /// <summary>
+    /// Every slice that can hold a resident, in the order the reason is reported.
+    /// Adding a slice means adding one entry — IsBusy, IsBusyElsewhere and BusyReason
+    /// all read this table, so none of them can drift out of sync with the others.
+    /// </summary>
+    static readonly SliceProbe[] Probes =
+    {
+        new SliceProbe
+        {
+            Name = "townLabor",
+            Holds = uid => TownLaborManager.IsBusy(uid),
+            Reason = () => NpcLabor.LaborText.T("town.busy.town", NpcLabor.LaborTerms.TownWork),
+        },
+        new SliceProbe
+        {
+            Name = "dispatch",
+            Holds = uid => DungeonDispatchManager.IsBusy(uid),
+            Reason = () => NpcLabor.LaborText.T("town.busy.dungeon", NpcLabor.LaborTerms.DungeonExplore),
+        },
+        new SliceProbe
+        {
+            Name = "process",
+            Holds = uid => ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uid,
+            Reason = () => NpcLabor.LaborText.T("town.busy.process", NpcLabor.LaborTerms.Process),
+        },
+        new SliceProbe
+        {
+            Name = "coCraft",
+            Holds = uid => CoCraftSession.Active && CoCraftSession.NpcUid == uid,
+            Reason = () => NpcLabor.LaborText.T("town.busy.coCraft"),
+        },
+        new SliceProbe
+        {
+            Name = CraftSlice,
+            Holds = uid => CraftManager.Has(uid),
+            Reason = () => NpcLabor.LaborText.T("town.busy.craft"),
+        },
+    };
+
+    /// <summary>
+    /// Production is the one slice that asks "is this person free?" about its own
+    /// candidates — see <see cref="IsBusyElsewhere"/>.
+    /// </summary>
+    const string CraftSlice = "craft";
+
+    internal static bool IsBusy(int uidChara)
+        => AnyBusy(uidChara, includeCraft: true);
 
     /// <summary>
     /// Busy check for the production slice itself. It must not count its own assignment as
@@ -66,45 +72,34 @@ return false;
     /// So this checks every other slice and skips the craft table.
     /// </summary>
     internal static bool IsBusyElsewhere(int uidChara)
+        => AnyBusy(uidChara, includeCraft: false);
+
+    static bool AnyBusy(int uidChara, bool includeCraft)
     {
         if (uidChara <= 0)
         {
             return false;
         }
 
-        try
+        for (int i = 0; i < Probes.Length; i++)
         {
-            if (TownLaborManager.IsBusy(uidChara))
+            SliceProbe p = Probes[i];
+            if (!includeCraft && p.Name == CraftSlice)
             {
-                return true;
+                continue;
             }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (DungeonDispatchManager.IsBusy(uidChara))
+
+            try
             {
-                return true;
+                if (p.Holds(uidChara))
+                {
+                    return true;
+                }
             }
+            catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
         }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uidChara)
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (CoCraftSession.Active && CoCraftSession.NpcUid == uidChara)
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-return false;
+
+        return false;
     }
 
     internal static bool IsBusy(Chara? c)
@@ -132,46 +127,19 @@ return false;
         }
 
         int uid = c.uid;
-        try
+        for (int i = 0; i < Probes.Length; i++)
         {
-            if (TownLaborManager.IsBusy(uid))
+            SliceProbe p = Probes[i];
+            try
             {
-                return NpcLabor.LaborText.T("town.busy.town", NpcLabor.LaborTerms.TownWork);
+                if (p.Holds(uid))
+                {
+                    return p.Reason();
+                }
             }
+            catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
         }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (DungeonDispatchManager.IsBusy(uid))
-            {
-                return NpcLabor.LaborText.T("town.busy.dungeon", NpcLabor.LaborTerms.DungeonExplore);
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uid)
-            {
-                return NpcLabor.LaborText.T("town.busy.process", NpcLabor.LaborTerms.Process);
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (CoCraftSession.Active && CoCraftSession.NpcUid == uid)
-            {
-                return NpcLabor.LaborText.T("town.busy.coCraft");
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-        try
-        {
-            if (CraftManager.Has(uid))
-            {
-                return NpcLabor.LaborText.T("town.busy.craft");
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-return null;
+
+        return null;
     }
 }
