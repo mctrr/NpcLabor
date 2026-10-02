@@ -1,4 +1,4 @@
-﻿using NpcLabor.TownLabor;
+using NpcLabor.TownLabor;
 using System;
 using System.Collections.Generic;
 using System.IO;
