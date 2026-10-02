@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using BepInEx;
 using HarmonyLib;
 using NpcLabor.Dispatch;
+using NpcLabor.Patches;
 using NpcLabor.TownLabor;
 using NpcLabor.Process;
 using ReflexCLI;
@@ -52,11 +53,13 @@ internal class Plugin : BaseUnityPlugin
         RegisterReflexCommands("Awake-pre");
         try
         {
-            Harmony.PatchAll(Assembly.GetExecutingAssembly());
+            // Per-class mount + audit instead of Harmony.PatchAll: a single signature
+            // drift must not silently kill every patch class after it.
+            PatchAudit.ApplyAll(Harmony, Assembly.GetExecutingAssembly());
         }
         catch (System.Exception ex)
         {
-            LogError("Harmony.PatchAll failed (console still registered): " + ex.Message);
+            LogError("Harmony patching failed (console still registered): " + ex.Message);
         }
 
         RegisterReflexCommands("Awake-post");
@@ -217,7 +220,7 @@ internal class Plugin : BaseUnityPlugin
             {
                 CommandRegistry.Rebuild();
                 _reflexRegistered = true;
-                LogInfo("Reflex commands registered (" + phase + "): NpcLaborHarvest / NpcLaborComplete / NpcLaborCompleteOne");
+                LogInfo("Reflex commands registered (" + phase + "): NpcLaborHarvest / NpcLaborComplete / NpcLaborCompleteOne / NpcLaborPatches");
             }
         }
         catch (System.Exception ex)
