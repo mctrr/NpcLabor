@@ -425,6 +425,37 @@ internal static class DungeonDispatchTargets
         return sum;
     }
 
+    /// <summary>
+    /// The skill a region actually pays for: lumber in forest, mining or digging in the
+    /// mountains, digging or fishing on a beach. Anywhere else there is no specialty, so
+    /// the caller's gathering value comes straight back and can be folded in without the
+    /// caller special-casing "plain".
+    /// </summary>
+    internal static int RegionSpecialtySkill(Chara c, string? regionKind, int noSpecialty)
+    {
+        string rk = NormalizeRegionKind(regionKind);
+        if (rk == "forest")
+        {
+            return SafeSkill(c, DungeonDispatchMission.SkillLumber);
+        }
+
+        if (rk == "mountain")
+        {
+            return Math.Max(
+                SafeSkill(c, DungeonDispatchMission.SkillMining),
+                SafeSkill(c, DungeonDispatchMission.SkillDigging));
+        }
+
+        if (rk == "beach")
+        {
+            return Math.Max(
+                SafeSkill(c, DungeonDispatchMission.SkillDigging),
+                SafeSkill(c, DungeonDispatchMission.SkillFishing));
+        }
+
+        return noSpecialty;
+    }
+
     internal static int AggregateRegionGather(IList<Chara> members, string? regionKind)
     {
         if (members == null || members.Count == 0)
@@ -438,25 +469,8 @@ internal static class DungeonDispatchTargets
         {
             Chara c = members[i];
             int g = SafeSkill(c, DungeonDispatchMission.SkillGather);
-            if (rk == "forest")
-            {
-                g = Math.Max(g, SafeSkill(c, DungeonDispatchMission.SkillLumber));
-            }
-            else if (rk == "mountain")
-            {
-                g = Math.Max(g, Math.Max(
-                    SafeSkill(c, DungeonDispatchMission.SkillMining),
-                    SafeSkill(c, DungeonDispatchMission.SkillDigging)));
-            }
-            else if (rk == "beach")
-            {
-                g = Math.Max(g, Math.Max(
-                    SafeSkill(c, DungeonDispatchMission.SkillDigging),
-                    SafeSkill(c, DungeonDispatchMission.SkillFishing)));
-            }
-            // plain: plain gathering skill only
-
-            sum += g;
+            // plain: no specialty, so g survives the Math.Max untouched.
+            sum += Math.Max(g, RegionSpecialtySkill(c, rk, g));
         }
 
         return sum;

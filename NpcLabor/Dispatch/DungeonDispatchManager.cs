@@ -562,30 +562,10 @@ return "name:" + (target.Name ?? "");
             int specialty = 0;
             if (region)
             {
-                // Per-region specialty: beach dig/fish, forest lumber, mountain mine, plain gather.
-                if (rk == "forest")
-                {
-                    specialty = DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillLumber);
-                    gather = Math.Max(gather, specialty);
-                }
-                else if (rk == "mountain")
-                {
-                    specialty = Math.Max(
-                        DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillMining),
-                        DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillDigging));
-                    gather = Math.Max(gather, specialty);
-                }
-                else if (rk == "beach")
-                {
-                    int dig = DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillDigging);
-                    int fish = DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillFishing);
-                    specialty = Math.Max(dig, fish);
-                    gather = Math.Max(gather, specialty);
-                }
-                else // plain
-                {
-                    specialty = gather;
-                }
+                // Per-region specialty: beach dig/fish, forest lumber, mountain mine.
+                // Plain has none, so it falls back to the plain gathering skill.
+                specialty = DungeonDispatchTargets.RegionSpecialtySkill(c, rk, gather);
+                gather = Math.Max(gather, specialty);
             }
             else
             {
@@ -717,30 +697,7 @@ return "name:" + (target.Name ?? "");
             int power = DungeonDispatchTargets.AggregateCombatPower(members);
             int explore = DungeonDispatchTargets.AggregateSkill(members, DungeonDispatchMission.SkillExplore);
             int lockpick = DungeonDispatchTargets.AggregateSkill(members, DungeonDispatchMission.SkillLockpick);
-            int gather = 0;
-            foreach (Chara c in members)
-            {
-                int g = DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillGather);
-                string rk = DungeonDispatchTargets.NormalizeRegionKind(target.RegionKind);
-                if (rk == "forest")
-                {
-                    g = Math.Max(g, DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillLumber));
-                }
-                else if (rk == "mountain")
-                {
-                    g = Math.Max(g, Math.Max(
-                        DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillMining),
-                        DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillDigging)));
-                }
-                else if (rk == "beach")
-                {
-                    g = Math.Max(g, Math.Max(
-                        DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillDigging),
-                        DungeonDispatchTargets.SafeSkill(c, DungeonDispatchMission.SkillFishing)));
-                }
-
-                gather += g;
-            }
+            int gather = DungeonDispatchTargets.AggregateRegionGather(members, target.RegionKind);
 
             int distDays = Math.Max(1, target.DistDays);
             int weeks = Mathf.Clamp(exploreWeeks <= 0 ? 1 : exploreWeeks, 1, 4);
