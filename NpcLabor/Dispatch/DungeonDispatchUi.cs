@@ -25,7 +25,7 @@ internal static class DungeonDispatchUi
         try
         {
             // Master switch. This is the single choke point for the whole board, so the
-            // trade and craft slices hanging off it are parked along with dispatch.
+            // craft slice hanging off it is parked along with dispatch.
             if (!LaborConfig.FeatureEnabled)
             {
                 Msg.Say(NpcLabor.LaborText.T("cfg.disabled"));
@@ -66,15 +66,6 @@ internal static class DungeonDispatchUi
     {
         FactionBranch? branch = EClass.BranchOrHomeBranch ?? EClass.Branch;
         var rows = new List<DispatchRow>();
-
-        // Slice F (caravan trade) hangs off the dispatch board rather than having its
-        // own button on the quest board chrome. A slice switched off in the config tab
-        // just loses its row: the switch gates the entry point, never a job already
-        // on the road, so cargo is never stranded by flipping a toggle.
-        if (NpcLabor.LaborConfig.FeatureTrade)
-        {
-            rows.Add(DispatchRow.Trade());
-        }
 
         // Slice G (base production) sits beside it: both slices are "what should the
         // people at home be doing".
@@ -164,12 +155,6 @@ internal static class DungeonDispatchUi
                     if (r.Kind == DispatchRowKind.Header)
                     {
                         SE.Beep();
-                        return;
-                    }
-
-                    if (r.Kind == DispatchRowKind.Trade)
-                    {
-                        NpcLabor.Trade.TradeUi.OpenBoard(board);
                         return;
                     }
 
@@ -978,7 +963,6 @@ internal static class DungeonDispatchUi
         Header,
         Active,
         Target,
-        Trade,
         Craft,
     }
 
@@ -994,19 +978,6 @@ internal static class DungeonDispatchUi
             => new DispatchRow { Kind = DispatchRowKind.Header, Label = text };
 
         /// <summary>
-        /// Slice F entry. Trade lives inside the dispatch board instead of owning a
-        /// second top level button, so both labour slices read as one place.
-        /// </summary>
-        public static DispatchRow Trade()
-            => new DispatchRow
-            {
-                Kind = DispatchRowKind.Trade,
-                Label = NpcLabor.LaborText.T("trade.ui.title"),
-                Sub = NpcLabor.Trade.TradeChest.Find() == null
-                    ? NpcLabor.LaborText.T("trade.chest.none")
-                    : NpcLabor.LaborText.T("trade.ui.statusHeader"),
-            };
-
         /// <summary>
         /// Slice G entry: standing production assignments for the residents at home,
         /// so "cook for the settlement" sits next to "send a caravan".

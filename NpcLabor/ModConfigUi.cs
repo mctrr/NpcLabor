@@ -43,7 +43,6 @@ internal static class ModConfigUi
         BuildProcessFuel(note, c);
         BuildTown(note, c);
         BuildDispatch(note, c);
-        BuildTrade(note, c);
         BuildUnlock(note, c);
     }
 
@@ -56,7 +55,6 @@ internal static class ModConfigUi
         Toggle(note, "cfg.feat.enabled", () => c.Features.Enabled, v => c.Features.Enabled = v);
         Toggle(note, "cfg.feat.dispatch", () => c.Features.Dispatch, v => c.Features.Dispatch = v);
         Toggle(note, "cfg.feat.townLabor", () => c.Features.TownLabor, v => c.Features.TownLabor = v);
-        Toggle(note, "cfg.feat.trade", () => c.Features.Trade, v => c.Features.Trade = v);
         Toggle(note, "cfg.feat.craft", () => c.Features.Craft, v => c.Features.Craft = v);
     }
 
@@ -110,26 +108,6 @@ internal static class ModConfigUi
         Int(note, "cfg.dis.expGatherRecall", () => d.ExpGatherRecall, v => d.ExpGatherRecall = v, 0, 500);
         Int(note, "cfg.dis.fameBase", () => d.FameBase, v => d.FameBase = v, 0, 500);
         Int(note, "cfg.dis.famePerDanger", () => d.FamePerDanger, v => d.FamePerDanger = v, 0, 100);
-    }
-
-    static void BuildTrade(UINote note, LaborConfigFile c)
-    {
-        TradeConfigSection t = c.Trade;
-        note.AddHeader(LaborText.T("cfg.sec.trade"), null);
-
-        Int(note, "cfg.trade.shuttleMoney", () => t.ShuttleMinMoney, v => t.ShuttleMinMoney = v, 0, 50000);
-        Int(note, "cfg.trade.crewMin", () => t.CrewMin, v => t.CrewMin = v, 1, 12);
-        Int(note, "cfg.trade.crewMax", () => t.CrewMax, v => t.CrewMax = v, 1, 12);
-        Int(note, "cfg.trade.stockLevel", () => t.StockLevel, v => t.StockLevel = v, 1, 100);
-        Int(note, "cfg.trade.distFree", () => t.DistFreeSteps, v => t.DistFreeSteps = v, 0, 100);
-        Int(note, "cfg.trade.distDays", () => t.DistMultMaxDays, v => t.DistMultMaxDays = v, 0, 365);
-        Int(note, "cfg.trade.distSteps", () => t.DistMultMaxSteps, v => t.DistMultMaxSteps = v, 0, 1000);
-        Float(note, "cfg.trade.distMult", () => t.DistMultMax, v => t.DistMultMax = v, 1f, 10f, "0.0");
-        Int(note, "cfg.trade.sellPercent", () => t.SellPercentPerDay, v => t.SellPercentPerDay = v, 1, 100);
-        Int(note, "cfg.trade.sellDaysMin", () => t.SellDaysMin, v => t.SellDaysMin = v, 1, 30);
-        Int(note, "cfg.trade.sellDaysMax", () => t.SellDaysMax, v => t.SellDaysMax = v, 1, 30);
-        Int(note, "cfg.trade.heavyFish", () => t.HeavyFishMaxWeight, v => t.HeavyFishMaxWeight = v, 0, 1000);
-        Int(note, "cfg.trade.fallbackNeg", () => t.CrewFallbackNegotiation, v => t.CrewFallbackNegotiation = v, 0, 100);
     }
 
     static void BuildUnlock(UINote note, LaborConfigFile c)

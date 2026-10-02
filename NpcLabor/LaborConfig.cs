@@ -20,9 +20,6 @@ internal sealed class LaborConfigFile
     [JsonProperty("dispatch")]
     public DispatchConfigSection Dispatch = new DispatchConfigSection();
 
-    [JsonProperty("trade")]
-    public TradeConfigSection Trade = new TradeConfigSection();
-
     [JsonProperty("processFuel")]
     public ProcessFuelConfigSection ProcessFuel = new ProcessFuelConfigSection();
 
@@ -85,82 +82,8 @@ internal sealed class FeatureConfigSection
     [JsonProperty("townLabor")]
     public bool TownLabor = true;
 
-    [JsonProperty("trade")]
-    public bool Trade = true;
-
     [JsonProperty("craft")]
     public bool Craft = true;
-}
-
-/// <summary>
-/// Slice F (caravan trade). Distances are overworld grid steps along the walked
-/// path, so every knob here is expressed in steps rather than in days.
-/// </summary>
-internal sealed class TradeConfigSection
-{
-    /// <summary>Single items heavier than this are cut from a fish pool. 0 disables the cap.</summary>
-    [JsonProperty("heavyFishMaxWeight")]
-    public int HeavyFishMaxWeight = 50;
-
-    /// <summary>Steps of distance that carry no price bonus at all.</summary>
-    [JsonProperty("distFreeSteps")]
-    public int DistFreeSteps = 2;
-
-    /// <summary>
-    /// 0 = derive the anchor from <see cref="DistMultMaxDays"/> (the normal case).
-    /// A positive number pins the anchor to an exact step count instead, which
-    /// overrides the day based rule.
-    /// </summary>
-    [JsonProperty("distMultMaxSteps")]
-    public int DistMultMaxSteps = 0;
-
-    /// <summary>
-    /// Walking days that pay the full distance multiplier. A caravan covers two
-    /// overworld tiles a day, so 60 days = 120 steps = x<see cref="DistMultMax"/>.
-    /// Read in game days because that is what the player sees in the trip estimate.
-    /// </summary>
-    [JsonProperty("distMultMaxDays")]
-    public int DistMultMaxDays = 60;
-
-    /// <summary>Hard ceiling for the distance multiplier.</summary>
-    [JsonProperty("distMultMax")]
-    public float DistMultMax = 2f;
-
-    /// <summary>Crew size. Goods are split evenly, so this doubles as the capacity knob.</summary>
-    [JsonProperty("crewMin")]
-    public int CrewMin = 2;
-
-    [JsonProperty("crewMax")]
-    public int CrewMax = 6;
-
-    /// <summary>Level used when generating a town's stock from the vanilla pools.</summary>
-    [JsonProperty("stockLevel")]
-    public int StockLevel = 20;
-
-    /// <summary>Share of the shipped quantity sold per day, in percent of the total.</summary>
-    [JsonProperty("sellPercentPerDay")]
-    public int SellPercentPerDay = 20;
-
-    /// <summary>Randomised number of days a full sell-off takes.</summary>
-    [JsonProperty("sellDaysMin")]
-    public int SellDaysMin = 2;
-
-    [JsonProperty("sellDaysMax")]
-    public int SellDaysMax = 5;
-
-    /// <summary>Negotiation used by console previews when no live crew is supplied.</summary>
-    [JsonProperty("crewFallbackNegotiation")]
-    public int CrewFallbackNegotiation = 0;
-
-    /// <summary>
-    /// Working capital a two-town shuttle refuses to leave without. A shuttle earns
-    /// its money by buying cheap and selling dear, so it has to be staked by the
-    /// player: the chest ledger must already hold this much before the crew may set
-    /// off. Nothing is conjured — an underfunded chest is a refusal, not a top-up.
-    /// One-way and colony routes ignore this.
-    /// </summary>
-    [JsonProperty("shuttleMinMoney")]
-    public int ShuttleMinMoney = 10000;
 }
 
 internal sealed class TownLaborConfigSection
@@ -306,15 +229,6 @@ internal static class LaborConfig
         }
     }
 
-    internal static TradeConfigSection Trade
-    {
-        get
-        {
-            EnsureLoaded();
-            return _data.Trade ?? (_data.Trade = new TradeConfigSection());
-        }
-    }
-
     internal static FeatureConfigSection Features
     {
         get
@@ -334,28 +248,8 @@ internal static class LaborConfig
     /// </summary>
     internal static bool FeatureDispatch => FeatureEnabled && Features.Dispatch;
     internal static bool FeatureTownLabor => FeatureEnabled && Features.TownLabor;
-    internal static bool FeatureTrade => FeatureEnabled && Features.Trade;
     internal static bool FeatureCraft => FeatureEnabled && Features.Craft;
 
-    internal static int TradeHeavyFishMaxWeight => Math.Max(0, Trade.HeavyFishMaxWeight);
-    internal static int TradeDistFreeSteps => Math.Max(0, Trade.DistFreeSteps);
-
-    /// <summary>Steps that reach the cap; 0 means "derive from the walking-day anchor".</summary>
-    internal static int TradeDistMultMaxSteps => Math.Max(0, Trade.DistMultMaxSteps);
-
-    /// <summary>Walking days that reach the cap; 0 falls back to the overworld length.</summary>
-    internal static int TradeDistMultMaxDays => Math.Max(0, Trade.DistMultMaxDays);
-
-    internal static double TradeDistMultMax => Math.Max(1.0, Trade.DistMultMax);
-
-    internal static int TradeCrewMin => Math.Max(1, Trade.CrewMin);
-    internal static int TradeCrewMax => Math.Max(TradeCrewMin, Trade.CrewMax);
-    internal static int TradeStockLevel => Math.Max(1, Trade.StockLevel);
-    internal static int TradeSellPercentPerDay => Math.Clamp(Trade.SellPercentPerDay, 1, 100);
-    internal static int TradeSellDaysMin => Math.Max(1, Trade.SellDaysMin);
-    internal static int TradeSellDaysMax => Math.Max(TradeSellDaysMin, Trade.SellDaysMax);
-    internal static int TradeCrewFallbackNegotiation => Math.Max(0, Trade.CrewFallbackNegotiation);
-    internal static int TradeShuttleMinMoney => Math.Max(0, Trade.ShuttleMinMoney);
 
     internal static int MinWagePerHour => Math.Max(0, Town.MinWagePerHour);
     internal static int ExpPerHour => Math.Max(0, Town.ExpPerHour);
@@ -495,7 +389,6 @@ internal static class LaborConfig
         {
             TownLabor = new TownLaborConfigSection(),
             Dispatch = new DispatchConfigSection(),
-            Trade = new TradeConfigSection(),
             Unlock = new UnlockConfigSection(),
             ProcessFuel = new ProcessFuelConfigSection(),
         };
@@ -516,11 +409,6 @@ internal static class LaborConfig
         if (file.Dispatch != null)
         {
             d.Dispatch = file.Dispatch;
-        }
-
-        if (file.Trade != null)
-        {
-            d.Trade = file.Trade;
         }
 
         if (file.Unlock != null)

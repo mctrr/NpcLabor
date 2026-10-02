@@ -4,7 +4,6 @@ using UnityEngine;
 using NpcLabor.Dispatch;
 using NpcLabor.TownLabor;
 using NpcLabor.Process;
-using NpcLabor.Trade;
 using NpcLabor.Craft;
 
 namespace NpcLabor.Patches;
@@ -52,18 +51,6 @@ internal static class DispatchGameDateHourPatch
 
         try
         {
-            if (TradeManager.Active)
-            {
-                TradeManager.OnSimulateHour();
-            }
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogWarn("trade gamedate hour: " + ex.Message);
-        }
-
-        try
-        {
             if (CraftManager.IsRunning)
             {
                 CraftManager.OnSimulateHour();
@@ -97,8 +84,7 @@ internal static class DispatchGameDateHourPatch
 
     static void FlushHourSaves()
     {
-        if (!DungeonDispatchManager.HasPendingHourSave && !TownLaborManager.HasPendingHourSave
-            && !TradeManager.HasPendingHourSave)
+        if (!DungeonDispatchManager.HasPendingHourSave && !TownLaborManager.HasPendingHourSave)
         {
             return;
         }
@@ -107,8 +93,6 @@ internal static class DispatchGameDateHourPatch
         catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs dispatch hour-save: " + __e.Message); }
         try { TownLaborManager.FlushPendingHourSave(); }
         catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs town hour-save: " + __e.Message); }
-        try { TradeManager.FlushPendingHourSave(); }
-        catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs trade hour-save: " + __e.Message); }
     }
 }
 
@@ -191,7 +175,6 @@ internal static class DispatchSavePatch
             TownLaborManager.SanitizeBrokenTrackerQuestsForSave();
             DungeonDispatchManager.Save();
             TownLaborManager.Save();
-            TradeManager.Save();
             CraftManager.Save();
         }
         catch (Exception ex)
@@ -236,7 +219,6 @@ internal static class DispatchLoadPatch
             // Load() already heals list (drop Dummy/orphan/dup, Start only if missing).
             DungeonDispatchManager.Load();
             TownLaborManager.Load();
-            TradeManager.Load();
             CraftManager.Load();
             // List heal only inside Load (Start missing pins). Do not thrash WidgetQuestTracker here.
         }
@@ -453,12 +435,12 @@ return false;
             btn.mainText.color = UnityEngine.Color.white;
         }
         catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs silent catch: " + __e.Message); }
-try
+        try
         {
             btn.mainText.SetColor(FontColor.Button);
         }
         catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs silent catch: " + __e.Message); }
-try
+        try
         {
             btn.mainText.color = UnityEngine.Color.white;
         }
@@ -492,10 +474,6 @@ internal static class DispatchZoneEnterPatch
             DungeonDispatchManager.OnZoneEntered(__instance);
             TownLaborManager.OnZoneEntered(__instance);
             ProcessorJobSession.OnZoneEntered(__instance);
-
-            // A loading caravan sets off the moment the PC walks away, and a caravan
-            // parked at home unloads when the PC comes back to the chest.
-            TradeManager.OnZoneActivated(__instance);
         }
         catch (Exception ex)
         {
@@ -530,7 +508,7 @@ internal static class DispatchShowDialogPatch
                 Msg.Say(NpcLabor.LaborText.T("dis.msg.busyTalk", who));
             }
             catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs silent catch: " + __e.Message); }
-try
+            try
             {
                 SE.Beep();
             }
@@ -570,7 +548,7 @@ internal static class DispatchLayerInteractionPatch
                 Msg.Say(NpcLabor.LaborText.T("dis.msg.busyInteract", who));
             }
             catch (System.Exception __e) { Plugin.LogDebug("DispatchPatches.cs silent catch: " + __e.Message); }
-try
+            try
             {
                 SE.Beep();
             }

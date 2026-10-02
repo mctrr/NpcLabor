@@ -2,7 +2,6 @@ using NpcLabor.CoCraft;
 using NpcLabor.Craft;
 using NpcLabor.Dispatch;
 using NpcLabor.Process;
-using NpcLabor.Trade;
 
 namespace NpcLabor.TownLabor;
 
@@ -20,21 +19,13 @@ internal static class LaborBusy
 
         try
         {
-            if (TradeManager.IsBusy(uidChara))
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
-        {
             if (TownLaborManager.IsBusy(uidChara))
             {
                 return true;
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (DungeonDispatchManager.IsBusy(uidChara))
             {
@@ -42,7 +33,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uidChara)
             {
@@ -50,7 +41,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (CoCraftSession.Active && CoCraftSession.NpcUid == uidChara)
             {
@@ -58,7 +49,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (CraftManager.Has(uidChara))
             {
@@ -83,21 +74,13 @@ return false;
 
         try
         {
-            if (TradeManager.IsBusy(uidChara))
-            {
-                return true;
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
-        {
             if (TownLaborManager.IsBusy(uidChara))
             {
                 return true;
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (DungeonDispatchManager.IsBusy(uidChara))
             {
@@ -105,7 +88,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uidChara)
             {
@@ -113,7 +96,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (CoCraftSession.Active && CoCraftSession.NpcUid == uidChara)
             {
@@ -151,21 +134,13 @@ return false;
         int uid = c.uid;
         try
         {
-            if (TradeManager.IsBusy(uid))
-            {
-                return NpcLabor.LaborText.T("town.busy.trade");
-            }
-        }
-        catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
-        {
             if (TownLaborManager.IsBusy(uid))
             {
                 return NpcLabor.LaborText.T("town.busy.town", NpcLabor.LaborTerms.TownWork);
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (DungeonDispatchManager.IsBusy(uid))
             {
@@ -173,7 +148,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (ProcessorJobSession.IsJobHeld() && ProcessorJobSession.NpcUid == uid)
             {
@@ -181,7 +156,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (CoCraftSession.Active && CoCraftSession.NpcUid == uid)
             {
@@ -189,7 +164,7 @@ try
             }
         }
         catch (System.Exception __e) { Plugin.LogDebug("LaborBusy.cs silent catch: " + __e.Message); }
-try
+        try
         {
             if (CraftManager.Has(uid))
             {

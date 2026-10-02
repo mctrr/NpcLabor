@@ -180,7 +180,6 @@ internal class Plugin : BaseUnityPlugin
         ProcessorJobSession.Clear("plugin-destroy", announce: false);
         DungeonDispatchManager.ClearAllRuntime();
         TownLaborManager.ClearAllRuntime();
-        Trade.TradeManager.ClearAllRuntime();
         Craft.CraftEngine.Invalidate();
 
         // Drop the config delegates so a hot reload cannot call into an unloaded assembly,
