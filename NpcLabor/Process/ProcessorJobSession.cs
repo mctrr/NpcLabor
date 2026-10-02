@@ -1321,6 +1321,12 @@ internal static class ProcessorJobSession
         // GetRaw() is game minutes. Live duration is AI progress steps; treat each
         // step as one minute so leave/return settle without simulating ticks off-map.
         // Away rate is half on-map speed (user lock).
+        //
+        // The 1 step = 1 minute mapping is a deliberate approximation, not a measured
+        // conversion: an on-map craft also burns frames on walking and the progress
+        // animation that off-map catch-up never runs, so the two are not comparable
+        // one-to-one. Re-tune MinutesPerProgress only against real play timings —
+        // it scales catch-up output linearly.
         int now = CurrentRawDate();
         int elapsedMins = SuspendedAtRaw > 0 && now > SuspendedAtRaw ? now - SuspendedAtRaw : 0;
         int minsPerCraft = Mathf.Max(1, EstimateDuration() * MinutesPerProgress * AwaySpeedDivisor);
