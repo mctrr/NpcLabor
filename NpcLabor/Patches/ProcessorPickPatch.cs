@@ -1,4 +1,4 @@
-using HarmonyLib;
+﻿using HarmonyLib;
 using NpcLabor.Process;
 
 namespace NpcLabor.Patches;
@@ -26,7 +26,7 @@ internal static class ProcessorPickPatch
                 return true;
             }
 
-            // Guard against reentrancy while Clear/ReturnIngredientsToPc picks leftovers.
+            // Guard against reentrancy while Clear/ReturnIngredients places leftovers.
             if (ProcessorJobSession.IsReturningIngredients)
             {
                 return true;

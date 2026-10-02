@@ -1,4 +1,20 @@
 {
+  "features": {
+    "enabled": true,
+    "dispatch": true,
+    "townLabor": true,
+    "trade": true,
+    "craft": true
+  },
+  "processFuel": {
+    "customFuel": true,
+    "costPerBurn": 5,
+    "valueLeaf": 1,
+    "valueBranch": 2,
+    "valueLog": 10,
+    "valueCarbonLog": 20,
+    "valueCarbonBranch": 5
+  },
   "townLabor": {
     "minWagePerHour": 50,
     "expPerHour": 12,
@@ -27,6 +43,21 @@
     "expGatherRecall": 15,
     "fameBase": 30,
     "famePerDanger": 2
+  },
+  "trade": {
+    "heavyFishMaxWeight": 50,
+    "distFreeSteps": 2,
+    "distMultMaxSteps": 0,
+    "distMultMaxDays": 60,
+    "distMultMax": 2.0,
+    "crewMin": 2,
+    "crewMax": 6,
+    "stockLevel": 20,
+    "sellPercentPerDay": 20,
+    "sellDaysMin": 2,
+    "sellDaysMax": 5,
+    "crewFallbackNegotiation": 0,
+    "shuttleMinMoney": 10000
   },
   "unlock": {
     "regionBranchLv": 3,

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace NpcLabor.Process;
@@ -162,7 +162,7 @@ internal class AI_NpcProcess : AIAct
             }
 
             List<Thing> targets = new List<Thing>(sources);
-            if (!crafter.IsFuelEnough(1, targets))
+            if (!EnsureFuel(owner, crafter, machine, targets))
             {
                 ProcessorJobSession.Clear("no-fuel");
                 yield return Cancel();
@@ -586,6 +586,51 @@ yield return Do(progress);
         return null;
     }
 
+    /// <summary>
+    /// Keep the machine fed instead of stopping halfway. With the optional burn-value model
+    /// on, the worker pays points out of the machine's own pool and refills it from leaves,
+    /// twigs and logs nearby; otherwise it tops the charge up through vanilla's own refuel
+    /// path (<c>Trait.TryRefuel</c> — the machine's spot and the player's pack, never the
+    /// ingredients on the bench). Either way a long smelting run only stops when there is
+    /// genuinely no fuel left anywhere.
+    /// </summary>
+    static bool EnsureFuel(Chara worker, TraitCrafter crafter, Card machine, List<Thing> targets)
+    {
+        try
+        {
+            if (!crafter.IsRequireFuel)
+            {
+                return true;
+            }
+
+            if (ProcessorFuel.Custom)
+            {
+                return ProcessorFuel.EnsureFuel(worker, machine, targets);
+            }
+
+            int need = Mathf.Max(1, crafter.FuelCost);
+            if (machine.c_charges >= need)
+            {
+                return true;
+            }
+
+            crafter.TryRefuel(need - machine.c_charges, targets);
+            return machine.c_charges >= need;
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("processor refuel: " + ex.Message);
+            try
+            {
+                return !crafter.IsRequireFuel || machine.c_charges >= Mathf.Max(1, crafter.FuelCost);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
     static int ComputeDuration(TraitCrafter crafter, AI_UseCrafter shell, int costSp)
     {
         // Mirror TraitCrafter.GetDuration but use NPC skill instead of EClass.pc,
@@ -698,7 +743,7 @@ int exp = 0;
                 {
                     if (ing3 != null && !ing3.isDestroyed && ing3.ExistsOnMap)
                     {
-                        try { ProcessorJobSession.ReturnOneIngredientToPc(ing3); }
+                        try { ProcessorJobSession.ReturnOneIngredient(ing3); }
                         catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
                     }
                 }
@@ -738,11 +783,18 @@ int exp = 0;
         {
             try
             {
-                machine.ModCharge(-crafter.FuelCost * 1);
-                if (machine.c_charges <= 0)
+                if (ProcessorFuel.Custom)
                 {
-                    machine.c_charges = 0;
-                    crafter.Toggle(on: false);
+                    ProcessorFuel.Spend(machine);
+                }
+                else
+                {
+                    machine.ModCharge(-crafter.FuelCost * 1);
+                    if (machine.c_charges <= 0)
+                    {
+                        machine.c_charges = 0;
+                        crafter.Toggle(on: false);
+                    }
                 }
             }
             catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
@@ -845,7 +897,7 @@ int exp = 0;
         List<Thing> targets = new List<Thing>(sources);
         try
         {
-            if (!crafter.IsFuelEnough(1, targets))
+            if (!EnsureFuel(worker, crafter, machine, targets))
             {
                 return false;
             }

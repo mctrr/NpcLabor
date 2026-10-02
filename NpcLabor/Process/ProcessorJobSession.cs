@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace NpcLabor.Process;
@@ -53,6 +53,8 @@ internal static class ProcessorJobSession
     internal static int ResumeIgnoreCancelUntilFrame;
     /// <summary>Bounded retries when the freestanding process AI is cancelled on the work zone (e.g. a lingering wait order). Resets on job start / clear / successful craft.</summary>
     internal static int AiRestartBudget = 3;
+    /// <summary>Frame the last "leftovers went elsewhere" note was shown on, so one batch says it once.</summary>
+    static int _leftoverNoteFrame = -1;
 
     // Strong refs: installed furniture is not always found via map uid lookup alone.
     internal static TraitCrafter? CrafterRef;
@@ -257,7 +259,7 @@ internal static class ProcessorJobSession
             Thing? src = ings[i];
             if (src == null || src.isDestroyed || src.Num <= 0)
             {
-                ReturnIngredientsToPc();
+                ReturnIngredients();
                 Ingredients.Clear();
                 IngredientMarks.Clear();
                 return false;
@@ -267,7 +269,7 @@ internal static class ProcessorJobSession
             // Do not hold bulk materials in PC inventory (overweight).
             if (!ParkIngredientOnMachine(src, crafter))
             {
-                ReturnIngredientsToPc();
+                ReturnIngredients();
                 Ingredients.Clear();
                 IngredientMarks.Clear();
                 return false;
@@ -676,7 +678,7 @@ internal static class ProcessorJobSession
             {
                 try { TryRebindIngredients(GetMachineCard()); } catch { }
             }
-            ReturnIngredientsToPc();
+            ReturnIngredients();
             Ingredients.Clear();
             IngredientMarks.Clear();
             return;
@@ -702,7 +704,7 @@ internal static class ProcessorJobSession
         }
 
         // Return any leftover claimed ingredients still on map / held by NPC.
-        ReturnIngredientsToPc();
+        ReturnIngredients();
         Ingredients.Clear();
         IngredientMarks.Clear();
 
@@ -829,7 +831,11 @@ internal static class ProcessorJobSession
         }
     }
 
-    internal static void ReturnIngredientsToPc()
+    /// <summary>
+    /// Hand every leftover stack back. Stacks are placed, not dumped: see
+    /// <see cref="ReturnOneIngredient"/>.
+    /// </summary>
+    internal static void ReturnIngredients()
     {
         if (EClass.pc == null)
         {
@@ -854,7 +860,7 @@ internal static class ProcessorJobSession
 
                 try
                 {
-                    ReturnOneIngredientToPc(t);
+                    ReturnOneIngredient(t);
                 }
                 catch (System.Exception ex)
                 {
@@ -963,27 +969,144 @@ internal static class ProcessorJobSession
         }
         try { piece.ignoreAutoPick = true; } catch { }
     }
-    internal static void ReturnOneIngredientToPc(Thing t)
+    /// <summary>
+    /// Hand one leftover stack back — never by burying the player under it.
+    /// Whatever is left goes back onto the machine tile as one stack, with auto-pick
+    /// left off so an idle player cannot vacuum the pile straight back into the fatal
+    /// overload this used to cause.
+    /// </summary>
+    internal static void ReturnOneIngredient(Thing t)
     {
-        if (t == null || t.isDestroyed || t.Num <= 0 || EClass.pc == null)
+        if (t == null || t.isDestroyed || t.Num <= 0)
         {
             return;
         }
+
         ClearParkFlags(t);
-        Card? root = null;
+
         try
         {
-            root = t.GetRootCard();
+            Card? root = t.GetRootCard();
+            if (root != null && root.IsPC)
+            {
+                return;
+            }
         }
         catch
         {
-            root = null;
         }
-        if (root != null && root.IsPC)
+
+        if (DropBeside(t, WorkPoint()))
+        {
+            NoteLeftover();
+            return;
+        }
+
+        // No floor to put it on at all: the pack is the only place it will not vanish.
+        try
+        {
+            EClass.pc?.Pick(t);
+            Plugin.LogWarn("processor leftover went to the pack: nowhere else to put it");
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogWarn("processor return lost: " + ex.Message);
+        }
+    }
+
+    /// <summary>Where the job actually happens: the machine, else the worker, else the player.</summary>
+    static Point? WorkPoint()
+    {
+        try
+        {
+            Card? machine = GetMachineCard();
+            if (machine != null && machine.ExistsOnMap && machine.pos != null)
+            {
+                return machine.pos;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            Chara? worker = GetWorker();
+            if (worker != null && worker.ExistsOnMap && worker.pos != null)
+            {
+                return worker.pos;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (EClass.pc != null && EClass.pc.ExistsOnMap)
+            {
+                return EClass.pc.pos;
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Leave the stack on the floor at the work spot (the machine tile, or the worker's
+    /// feet if the machine is gone). Auto-pick stays off: letting a pile this size be
+    /// auto-looted would only rebuild the overload that killed the player.
+    /// </summary>
+    static bool DropBeside(Thing t, Point? at)
+    {
+        Point? p = at ?? EClass.pc?.pos;
+        if (p == null || EClass._zone == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            t.parent?.RemoveCard(t);
+            Card card = EClass._zone.AddCard(t, p);
+            if (card == null || card.isDestroyed)
+            {
+                return false;
+            }
+
+            Thing placed = card as Thing ?? t;
+            try { placed.altitude = 0; } catch { }
+            try { placed.isHidden = false; } catch { }
+            try { placed.ignoreAutoPick = true; } catch { }
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.LogDebug("processor drop leftover: " + ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>Tell the player where the leftovers went, once per frame at most.</summary>
+    static void NoteLeftover()
+    {
+        int frame;
+        try { frame = Time.frameCount; } catch { frame = -1; }
+        if (_leftoverNoteFrame == frame)
         {
             return;
         }
-        EClass.pc.Pick(t);
+
+        _leftoverNoteFrame = frame;
+
+        string what = MachineName ?? NpcLabor.LaborText.T("proc.msg.machineFallback");
+        string msg = NpcLabor.LaborText.T("proc.msg.leftoverGround", what);
+
+        try { Msg.SayRaw(msg); } catch { }
+        Plugin.LogInfo("processor leftover: " + msg);
     }
     /// <summary>True when a process job occupies the worker (running or held away).</summary>
     internal static bool IsJobHeld()

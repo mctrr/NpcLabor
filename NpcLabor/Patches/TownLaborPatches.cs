@@ -37,6 +37,13 @@ internal static class TownLaborQuestBoardPatch
             return;
         }
 
+        // Slice switch: with town labor off no short-term job is offered on the board.
+        // Any shift already underway keeps running and still pays out.
+        if (!LaborConfig.FeatureTownLabor)
+        {
+            return;
+        }
+
         var offers = TownLaborManager.ListOffers(EClass._zone);
         if (offers == null || offers.Count == 0)
         {

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using HarmonyLib;
 using NpcLabor.CoCraft;
 using NpcLabor.Process;
@@ -918,7 +918,7 @@ try
 
             try
             {
-                ProcessorJobSession.ReturnOneIngredientToPc(t);
+                ProcessorJobSession.ReturnOneIngredient(t);
             }
             catch (System.Exception __e) { Plugin.LogDebug("LayerDragGridPatches.cs silent catch: " + __e.Message); }
         }

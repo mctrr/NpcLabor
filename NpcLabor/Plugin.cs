@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BepInEx;
@@ -22,6 +25,23 @@ internal class Plugin : BaseUnityPlugin
     internal static Plugin? Instance;
     internal static Harmony? Harmony;
     static bool _reflexRegistered;
+    static bool _configHooked;
+    static bool _configHookWarned;
+
+    /// <summary>
+    /// Fills the config tab that <c>LayerModConfig</c> renders for
+    /// <c>ModPackage.onBuildConfig</c>.
+    ///
+    /// Deliberately NOT an <c>IModConfig</c> implementor. That interface is not the
+    /// binding contract - the delegate field is - and it exists purely so the shipped
+    /// ModdingKit package (<c>Package/_ModdingKit</c>, <c>EModding.ModConfig.RegisterAll</c>)
+    /// can auto-wire mods. It would append <c>+=</c> to the very delegate we assign, and
+    /// its single registration point is <c>Core.StartCase</c> - too late for the mod list
+    /// on the title screen. Two registrants on one delegate means every row is drawn
+    /// twice, so we take the whole job ourselves and skip the interface.
+    /// </summary>
+    public void OnBuildConfig(UINote note)
+        => ModConfigUi.Build(note);
 
     private void Awake()
     {
@@ -54,6 +74,104 @@ internal class Plugin : BaseUnityPlugin
         RegisterReflexCommands("Start");
     }
 
+    private void Update()
+    {
+        // The mod list is not built when Awake runs, so the config delegate is attached
+        // lazily. Both calls are a bool check on the hot path once they are done.
+        HookModConfig();
+        LaborConfig.TickAutoSave();
+    }
+
+    /// <summary>
+    /// Hand our config tab to the package row. Silently retries every frame until the
+    /// mod list exists: ModManager builds its packages during game boot, well after
+    /// BepInEx calls Awake, and ModPackage.onBuildConfig must be non-null before the
+    /// mod list is drawn or the row renders without a config button.
+    /// </summary>
+    void HookModConfig()
+    {
+        if (_configHooked)
+        {
+            return;
+        }
+
+        try
+        {
+            ModPackage? pkg = FindOwnPackage();
+            if (pkg == null)
+            {
+                return;
+            }
+
+            pkg.onBuildConfig = OnBuildConfig;
+            pkg.onResetConfig = ModConfigUi.Reset;
+            pkg.configPath = LaborConfig.ConfigPath;
+            _configHooked = true;
+            LogInfo("ModConfig tab attached to package " + pkg.id);
+        }
+        catch (Exception ex)
+        {
+            // Keep retrying - a failure here is usually transient (model not ready yet).
+            // Warn once so a permanent failure is visible without flooding the log.
+            if (!_configHookWarned)
+            {
+                _configHookWarned = true;
+                LogWarn("ModConfig tab hook failed: " + ex.Message);
+            }
+        }
+    }
+
+    static ModPackage? FindOwnPackage()
+    {
+        // Preferred: the official lookup, which is authoritative once packages are mapped.
+        try
+        {
+            ModPackage? byId = ModUtil.GetModPackage("mctrr.npclabor");
+            if (byId != null)
+            {
+                return byId;
+            }
+        }
+        catch
+        {
+        }
+
+        // Fallback: scan the live package list by id, then by our own folder name, so a
+        // renamed folder or a stale id mapping cannot leave the tab unattached.
+        try
+        {
+            List<BaseModPackage>? all = EClass.core?.mods?.packages;
+            if (all == null)
+            {
+                return null;
+            }
+
+            foreach (BaseModPackage p in all)
+            {
+                if (p is ModPackage mp && mp.id == "mctrr.npclabor")
+                {
+                    return mp;
+                }
+            }
+
+            string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? "";
+            foreach (BaseModPackage p in all)
+            {
+                if (p is ModPackage mp && mp.dirInfo != null && dir.Length > 0
+                    && string.Equals(mp.dirInfo.FullName.TrimEnd('\\', '/'), dir.TrimEnd('\\', '/'),
+                                     StringComparison.OrdinalIgnoreCase))
+                {
+                    return mp;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
     private void OnDestroy()
     {
         Harmony?.UnpatchSelf();
@@ -62,6 +180,25 @@ internal class Plugin : BaseUnityPlugin
         ProcessorJobSession.Clear("plugin-destroy", announce: false);
         DungeonDispatchManager.ClearAllRuntime();
         TownLaborManager.ClearAllRuntime();
+        Trade.TradeManager.ClearAllRuntime();
+        Craft.CraftEngine.Invalidate();
+
+        // Drop the config delegates so a hot reload cannot call into an unloaded assembly,
+        // and flush any save a throttled slider drag still had pending.
+        try
+        {
+            ModPackage? pkg = FindOwnPackage();
+            if (pkg != null)
+            {
+                pkg.onBuildConfig = null;
+                pkg.onResetConfig = null;
+            }
+        }
+        catch
+        {
+        }
+
+        LaborConfig.Save(immediate: true);
     }
 
     internal static void RegisterReflexCommands(string phase)

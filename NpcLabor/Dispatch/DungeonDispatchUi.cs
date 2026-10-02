@@ -24,6 +24,15 @@ internal static class DungeonDispatchUi
     {
         try
         {
+            // Master switch. This is the single choke point for the whole board, so the
+            // trade and craft slices hanging off it are parked along with dispatch.
+            if (!LaborConfig.FeatureEnabled)
+            {
+                Msg.Say(NpcLabor.LaborText.T("cfg.disabled"));
+                SE.Beep();
+                return;
+            }
+
             if (!IsAtPcFactionHome())
             {
                 Msg.Say(NpcLabor.LaborText.T(
@@ -58,6 +67,22 @@ internal static class DungeonDispatchUi
         FactionBranch? branch = EClass.BranchOrHomeBranch ?? EClass.Branch;
         var rows = new List<DispatchRow>();
 
+        // Slice F (caravan trade) hangs off the dispatch board rather than having its
+        // own button on the quest board chrome. A slice switched off in the config tab
+        // just loses its row: the switch gates the entry point, never a job already
+        // on the road, so cargo is never stranded by flipping a toggle.
+        if (NpcLabor.LaborConfig.FeatureTrade)
+        {
+            rows.Add(DispatchRow.Trade());
+        }
+
+        // Slice G (base production) sits beside it: both slices are "what should the
+        // people at home be doing".
+        if (NpcLabor.LaborConfig.FeatureCraft)
+        {
+            rows.Add(DispatchRow.Craft());
+        }
+
         // Active missions first (task tracker view).
         if (DungeonDispatchManager.Count > 0)
         {
@@ -68,8 +93,18 @@ internal static class DungeonDispatchUi
             }
         }
 
-        bool canRegion = NpcLabor.LaborTerms.CanRegionDispatch(out string? regionDeny);
-        bool canDungeon = NpcLabor.LaborTerms.CanDungeonExplore(out string? dungeonDeny);
+        // The dispatch switch folds into the same unlock gate the player already sees,
+        // so a closed slice reads as closed instead of silently missing. Declared up
+        // front because a short-circuited out argument leaves the local unassigned.
+        bool dispatchOn = NpcLabor.LaborConfig.FeatureDispatch;
+        string? regionDeny = null;
+        string? dungeonDeny = null;
+        bool canRegion = dispatchOn && NpcLabor.LaborTerms.CanRegionDispatch(out regionDeny);
+        bool canDungeon = dispatchOn && NpcLabor.LaborTerms.CanDungeonExplore(out dungeonDeny);
+        if (!dispatchOn)
+        {
+            rows.Add(DispatchRow.Header("— " + NpcLabor.LaborText.T("cfg.disabled") + " —"));
+        }
 
         List<DungeonDispatchTarget> regions = canRegion
             ? DungeonDispatchTargets.ListRegionTargets(branch)
@@ -82,7 +117,7 @@ internal static class DungeonDispatchUi
                 rows.Add(DispatchRow.FromTarget(t));
             }
         }
-        else if (!canRegion)
+        else if (!canRegion && dispatchOn)
         {
             rows.Add(DispatchRow.Header(regionDeny ?? NpcLabor.LaborText.T("dis.error.notUnlocked", NpcLabor.LaborTerms.RegionDispatch)));
         }
@@ -110,7 +145,7 @@ internal static class DungeonDispatchUi
                 rows.Add(DispatchRow.FromTarget(t));
             }
         }
-        else if (!canDungeon)
+        else if (!canDungeon && dispatchOn)
         {
             rows.Add(DispatchRow.Header(dungeonDeny ?? NpcLabor.LaborText.T("dis.error.notUnlocked", NpcLabor.LaborTerms.DungeonExplore)));
         }
@@ -129,6 +164,18 @@ internal static class DungeonDispatchUi
                     if (r.Kind == DispatchRowKind.Header)
                     {
                         SE.Beep();
+                        return;
+                    }
+
+                    if (r.Kind == DispatchRowKind.Trade)
+                    {
+                        NpcLabor.Trade.TradeUi.OpenBoard(board);
+                        return;
+                    }
+
+                    if (r.Kind == DispatchRowKind.Craft)
+                    {
+                        NpcLabor.Craft.CraftUi.OpenBoard(board);
                         return;
                     }
 
@@ -931,6 +978,8 @@ internal static class DungeonDispatchUi
         Header,
         Active,
         Target,
+        Trade,
+        Craft,
     }
 
     sealed class DispatchRow
@@ -943,6 +992,34 @@ internal static class DungeonDispatchUi
 
         public static DispatchRow Header(string text)
             => new DispatchRow { Kind = DispatchRowKind.Header, Label = text };
+
+        /// <summary>
+        /// Slice F entry. Trade lives inside the dispatch board instead of owning a
+        /// second top level button, so both labour slices read as one place.
+        /// </summary>
+        public static DispatchRow Trade()
+            => new DispatchRow
+            {
+                Kind = DispatchRowKind.Trade,
+                Label = NpcLabor.LaborText.T("trade.ui.title"),
+                Sub = NpcLabor.Trade.TradeChest.Find() == null
+                    ? NpcLabor.LaborText.T("trade.chest.none")
+                    : NpcLabor.LaborText.T("trade.ui.statusHeader"),
+            };
+
+        /// <summary>
+        /// Slice G entry: standing production assignments for the residents at home,
+        /// so "cook for the settlement" sits next to "send a caravan".
+        /// </summary>
+        public static DispatchRow Craft()
+            => new DispatchRow
+            {
+                Kind = DispatchRowKind.Craft,
+                Label = NpcLabor.LaborText.T("craft.ui.title"),
+                Sub = NpcLabor.Craft.CraftManager.IsRunning
+                    ? NpcLabor.LaborText.T("craft.ui.jobs")
+                    : NpcLabor.LaborText.T("craft.ui.noJobs"),
+            };
 
         public static DispatchRow Active(DungeonDispatchMission m)
         {
