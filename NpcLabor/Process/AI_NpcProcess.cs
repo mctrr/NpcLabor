@@ -287,7 +287,7 @@ yield return Do(progress);
             {
                 Plugin.LogInfo(
                     $"processor progress fail left={ProcessorJobSession.Remaining} done={ProcessorJobSession.Completed}");
-                CleanupPartialIngs(ings);
+                CleanupPartialIngs(ings, sources);
                 ProcessorJobSession.HandleAiInterrupted("ai-fail");
                 yield return Cancel();
                 yield break;
@@ -908,7 +908,7 @@ int exp = 0;
         catch (System.Exception ex)
         {
             Plugin.LogDebug("processor catch-up one failed: " + ex.Message);
-            CleanupPartialIngs(ings);
+            CleanupPartialIngs(ings, sources);
             return false;
         }
     }
@@ -936,14 +936,14 @@ int exp = 0;
             Thing src = sources[i];
             if (src == null || src.isDestroyed || src.Num <= 0)
             {
-                CleanupPartialIngs(ings);
+                CleanupPartialIngs(ings, sources);
                 return false;
             }
 
             if (!ProcessorJobSession.TryTakeCraftPiece(src, crafter, machine, worker, out Thing? piece)
                 || piece == null)
             {
-                CleanupPartialIngs(ings);
+                CleanupPartialIngs(ings, sources);
                 return false;
             }
 
@@ -995,7 +995,7 @@ int exp = 0;
         return true;
     }
 
-    static void CleanupPartialIngs(List<Thing> ings)
+    static void CleanupPartialIngs(List<Thing> ings, IList<Thing>? splitFrom = null)
     {
         if (ings == null)
         {
@@ -1003,8 +1003,9 @@ int exp = 0;
         }
 
         List<Thing> sources = ProcessorJobSession.Ingredients;
-        foreach (Thing t in ings)
+        for (int idx = 0; idx < ings.Count; idx++)
         {
+            Thing t = ings[idx];
             if (t == null || t.isDestroyed)
             {
                 continue;
@@ -1038,6 +1039,20 @@ int exp = 0;
             if (parked)
             {
                 continue;
+            }
+
+            // Give the amount back to the stack it was split from. Split(1) only hands
+            // back the parked stack itself when it held the last unit; otherwise it is a
+            // fresh stack whose Num was already taken off the bulk, so destroying it
+            // outright would make those materials vanish.
+            Thing? src = (splitFrom != null && idx < splitFrom.Count) ? splitFrom[idx] : null;
+            if (src != null && !src.isDestroyed && !ReferenceEquals(t, src))
+            {
+                try
+                {
+                    src.SetNum(src.Num + t.Num);
+                }
+                catch (System.Exception __e) { Plugin.LogDebug("AI_NpcProcess.cs silent catch: " + __e.Message); }
             }
 
             try
