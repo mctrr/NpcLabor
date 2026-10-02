@@ -820,13 +820,13 @@ string pcName;
             return NpcLabor.LaborText.T("town.error.cannotAssign", worker.NameSimple ?? worker.Name ?? ("#" + worker.uid));
         }
 
-        if (TownLaborJobs.MatchJob(client)?.Kind != def.Kind)
+        // Soft: a Kind mismatch is tolerated (the board may have offered a different
+        // role for the same shop), but a client whose job vanished outright cannot be
+        // started. Written as a plain null check because that is all it ever rejected —
+        // the old form also called MatchJob a second time on every mismatch.
+        if (TownLaborJobs.MatchJob(client) == null)
         {
-            // Soft: still allow if client still has a merchant trait, but prefer exact.
-            if (TownLaborJobs.MatchJob(client) == null)
-            {
-                return NpcLabor.LaborText.T("town.error.jobGone");
-            }
+            return NpcLabor.LaborText.T("town.error.jobGone");
         }
 
         bool wasParty = IsParty(worker);
